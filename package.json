@@ -1,28 +1,51 @@
 {
-  "name": "react-loc-analyzer",
-  "version": "1.0.2",
-  "repository": "github:amir-valizadeh/react-loc-analyzer",
-  "description": "Analyze lines of code in React projects with detailed statistics",
-  "main": "src/index.js",
-  "bin": {
-    "react-loc": "bin/cli.js"
-  },
+  "name": "ts-analyzer",
+  "version": "1.0.0",
+  "repository": "github:amir-valizadeh/ts-analyzer",
+  "description": "Comprehensive TypeScript code analyzer with type safety and complexity metrics",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
   "type": "module",
+  "bin": {
+    "ts-analyzer": "dist/bin/cli.js"
+  },
   "scripts": {
-    "start": "node bin/cli.js"
+    "build": "tsc",
+    "prepare": "npm run build",
+    "start": "node dist/bin/cli.js",
+    "dev": "ts-node --esm bin/cli.ts"
   },
   "keywords": [
+    "typescript",
+    "ts",
+    "analyzer",
+    "type-safety",
+    "code-quality",
+    "static-analysis",
+    "complexity",
     "react",
-    "lines-of-code",
-    "analysis",
-    "statistics",
-    "code-metrics"
+    "angular",
+    "vue",
+    "node"
   ],
-  "author":"Amir Valizadeh",
+  "author": "Amir Valizadeh",
   "license": "MIT",
   "dependencies": {
+    "chalk": "^5.3.0",
     "commander": "^11.0.0",
+    "espree": "^9.6.1",
+    "estraverse": "^5.3.0",
     "ora": "^7.0.1",
-    "chalk": "^5.3.0"
+    "typescript": "^5.8.3"
+  },
+  "devDependencies": {
+    "@types/espree": "^10.1.0",
+    "@types/estraverse": "^5.1.7",
+    "@types/estree": "^1.0.7",
+    "@types/node": "^20.17.47",
+    "ts-node": "^10.9.2"
+  },
+  "engines": {
+    "node": ">=14.16"
   }
 }
