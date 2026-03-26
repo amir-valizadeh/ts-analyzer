@@ -3,6 +3,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
+import fs from 'fs';
+import path from 'path';
 import { analyzeProject } from '../src/index.js';
 import { formatTable } from '../src/table-formatter.js';
 
@@ -14,36 +16,70 @@ interface ProgramOptions {
     color?: boolean;
     safety?: boolean;
     complexity?: boolean;
+    format?: string;
 }
 
 program
     .name('ts-analyzer')
     .description('Comprehensive TypeScript code analyzer with type safety and complexity metrics')
-    .version('1.1.2')
+    .version('1.2.0')
     .argument('[dir]', 'project directory to analyze', '.')
     .option('-e, --exclude <patterns>', 'additional patterns to exclude (comma-separated)')
     .option('-i, --include <extensions>', 'additional file extensions to include (comma-separated)')
     .option('--no-color', 'disable colored output')
     .option('--no-safety', 'disable TypeScript safety analysis')
     .option('--no-complexity', 'disable code complexity analysis')
+    .option('-f, --format <type>', 'output format (text or json)', 'text')
     .action(async (dir: string, options: ProgramOptions) => {
-        const spinner = ora('Analyzing React project...').start();
-        const useColors = options.color !== false;
+        let configOptions: any = {};
+        try {
+            const configPath = path.resolve(dir, 'ts-analyzer.config.json');
+            if (fs.existsSync(configPath)) {
+                const configContent = fs.readFileSync(configPath, 'utf8');
+                configOptions = JSON.parse(configContent);
+            }
+        } catch (error) {
+            console.warn(chalk.yellow('Warning: Could not parse ts-analyzer.config.json'));
+        }
+
+        const format = options.format !== 'text' ? options.format : (configOptions.format || 'text');
+        const isJson = format === 'json';
+        const useColors = options.color !== false && configOptions.color !== false && !isJson;
+
+        const spinner = isJson ? null : ora('Analyzing TypeScript project...').start();
 
         try {
-            const extraExcludes = options.exclude ? options.exclude.split(',') : [];
-            const extraExtensions = options.include ? options.include.split(',').map(ext =>
-                ext.startsWith('.') ? ext : `.${ext}`
-            ) : [];
+            let extraExcludes: string[] = [];
+            if (configOptions.exclude) extraExcludes.push(...configOptions.exclude);
+            if (options.exclude) extraExcludes.push(...options.exclude.split(','));
+
+            let extraExtensions: string[] = [];
+            if (configOptions.include) {
+                extraExtensions.push(...configOptions.include.map((ext: string) => ext.startsWith('.') ? ext : `.${ext}`));
+            }
+            if (options.include) {
+                extraExtensions.push(...options.include.split(',').map((ext: string) => ext.startsWith('.') ? ext : `.${ext}`));
+            }
+
+            const analyzeSafety = options.safety !== false && configOptions.safety !== false;
+            const analyzeComplexity = options.complexity !== false && configOptions.complexity !== false;
 
             const stats = await analyzeProject(dir, {
                 excludePatterns: extraExcludes,
                 additionalExtensions: extraExtensions,
-                analyzeSafety: options.safety !== false,
-                analyzeComplexity: options.complexity !== false
+                analyzeSafety,
+                analyzeComplexity
             });
 
-            spinner.succeed('Analysis complete!');
+            if (isJson) {
+                console.log(JSON.stringify(stats, (key, value) => {
+                    if (key === 'formatNumber' || key === 'formattedFileTypes') return undefined;
+                    return value;
+                }, 2));
+                process.exit(0);
+            }
+
+            spinner?.succeed('Analysis complete!');
 
             // Print summary table
             console.log('\n' + (useColors ? chalk.bold.green('Project Summary:') : 'Project Summary:'));
@@ -232,7 +268,7 @@ program
             }
 
         } catch (error) {
-            spinner.fail('Analysis failed');
+            spinner?.fail('Analysis failed');
             console.error(useColors ? chalk.red('Error:') : 'Error:', (error as Error).message);
             process.exit(1);
         }
