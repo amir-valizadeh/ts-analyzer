@@ -58,6 +58,7 @@ Options:
   --no-color                 disable colored output
   --no-safety                disable TypeScript safety analysis
   --no-complexity            disable code complexity analysis
+  -f, --format <type>        output format (text or json)
   -h, --help                 display help for command
 ```
 
@@ -80,7 +81,11 @@ npx ts-analyzer --no-safety
 
 ## Output
 
-The analyzer provides four main sections of output:
+The analyzer can output results in two formats: `text` (default) and `json`.
+
+### Text Output (Default)
+
+The text output provides five main sections:
 
 ### 1. Project Summary
 Shows overall statistics including:
@@ -324,6 +329,22 @@ The `ts-analyzer` is a significant improvement over the previous `react-loc-anal
 4. **Actionable Insights**: Generates specific recommendations to improve your code quality
 5. **Modern Implementation**: Fully written in TypeScript with strong typing throughout
 6. **Better Performance**: Optimized for faster analysis of large TypeScript projects
+
+## Configuration File
+
+You can configure `ts-analyzer` using a `ts-analyzer.config.json` file in the root of your project. This allows you to persist your settings without passing them as CLI arguments every time.
+
+```json
+{
+  "safety": true,
+  "complexity": true,
+  "format": "text",
+  "exclude": ["node_modules", "dist", ".next"],
+  "include": [".js", ".ts", ".tsx"]
+}
+```
+
+CLI arguments will always take precedence over the configuration file.
 
 ## Default Configuration
 
