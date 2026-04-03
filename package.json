@@ -1,6 +1,6 @@
 {
   "name": "ts-analyzer",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "repository": "github:amir-valizadeh/ts-analyzer",
   "description": "Comprehensive TypeScript code analyzer with type safety and complexity metrics",
   "main": "dist/src/index.js",
@@ -13,7 +13,9 @@
     "build": "tsc",
     "prepare": "npm run build",
     "start": "node dist/bin/cli.js",
-    "dev": "ts-node --esm bin/cli.ts"
+    "dev": "node --loader ts-node/esm bin/cli.ts",
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [
     "typescript",
@@ -43,7 +45,9 @@
     "@types/estraverse": "^5.1.7",
     "@types/estree": "^1.0.7",
     "@types/node": "^20.17.47",
-    "ts-node": "^10.9.2"
+    "@vitest/coverage-v8": "^4.1.2",
+    "ts-node": "^10.9.2",
+    "vitest": "^4.1.2"
   },
   "engines": {
     "node": ">=14.16"

@@ -2,6 +2,7 @@
 import * as ts from 'typescript';
 import fs from 'fs/promises';
 import path from 'path';
+import { constrainedMemory } from 'process';
 
 export interface TypeScriptMetrics {
     totalTypeableNodes: number;
@@ -14,6 +15,7 @@ export interface TypeScriptMetrics {
     genericsCount: number;
     typeSafetyScore: number;
     typeComplexity: string;
+    
 }
 
 export interface TypeScriptSafetyMetrics {
@@ -33,7 +35,7 @@ export interface TypeScriptSafetyMetrics {
 export async function analyzeTypeScriptSafety(filePath: string): Promise<TypeScriptMetrics> {
     try {
         const content = await fs.readFile(filePath, 'utf8');
-
+        
         // Create a source file
         const sourceFile = ts.createSourceFile(
             filePath,

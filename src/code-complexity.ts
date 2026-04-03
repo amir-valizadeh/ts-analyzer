@@ -40,6 +40,12 @@ export interface FileComplexityMetrics {
   functionCount: number;
   complexityScore: number;
   complexityRating: string;
+  codeSmells: {
+    magicNumbers: number;
+    callbackHell: number;
+    godFiles: number; // For God Classes/Files
+    excessiveParameters: number;
+  };
 }
 
 export interface CodeComplexityMetrics {
@@ -52,6 +58,12 @@ export interface CodeComplexityMetrics {
   totalFunctions: number;
   complexFiles: number;
   overallComplexity: string;
+  codeSmells: {
+    magicNumbers: number;
+    callbackHell: number;
+    godFiles: number;
+    excessiveParameters: number;
+  };
 }
 
 // Calculate cyclomatic complexity
@@ -171,8 +183,8 @@ function analyzeFunctions(ast: any): FunctionData[] {
         functions.push({
           type: node.type,
           name: node.id ? node.id.name : 'anonymous',
-          complexity,
-          nestingDepth,
+          complexity: node.complexity || complexity,
+          nestingDepth: node.nestingDepth || nestingDepth,
           paramCount,
           lineCount
         });
@@ -202,6 +214,13 @@ function parseTypeScriptFile(content: string): SimplifiedProgram {
 
     // Function to visit TypeScript nodes and extract function information
     function visit(node: ts.Node) {
+      if (ts.isLiteralExpression(node) && node.kind === ts.SyntaxKind.NumericLiteral) {
+          simplifiedAst.body.push({
+             type: 'Literal',
+             value: parseFloat(node.text)
+          });
+      }
+
       if (ts.isFunctionDeclaration(node) ||
           ts.isMethodDeclaration(node) ||
           ts.isArrowFunction(node) ||
@@ -210,7 +229,47 @@ function parseTypeScriptFile(content: string): SimplifiedProgram {
         const startLine = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
         const endLine = sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line + 1;
 
-        const functionNode = {
+        // Calculate complexity and nesting for this TS function
+        let complexity = 1;
+        let maxNesting = 0;
+        let currentNesting = 0;
+
+        function checkNode(n: ts.Node) {
+            // Complexity
+            if (ts.isIfStatement(n) || ts.isConditionalExpression(n) || ts.isCaseClause(n) ||
+                ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) ||
+                ts.isWhileStatement(n) || ts.isDoStatement(n)) {
+                complexity++;
+            }
+            if (ts.isBinaryExpression(n)) {
+                if (n.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+                    n.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+                    complexity++;
+                }
+            }
+
+            // Nesting
+            const isNestingNode = ts.isBlock(n) || ts.isIfStatement(n) || ts.isSwitchStatement(n) ||
+                                  ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) ||
+                                  ts.isWhileStatement(n) || ts.isDoStatement(n) || ts.isTryStatement(n);
+
+            if (isNestingNode) {
+                currentNesting++;
+                maxNesting = Math.max(maxNesting, currentNesting);
+            }
+
+            ts.forEachChild(n, checkNode);
+
+            if (isNestingNode) {
+                currentNesting--;
+            }
+        }
+
+        if (node.body) {
+            checkNode(node.body);
+        }
+
+        const functionNode: any = {
           type: ts.isFunctionDeclaration(node) ? 'FunctionDeclaration' :
               ts.isArrowFunction(node) ? 'ArrowFunctionExpression' : 'FunctionExpression',
           id: ts.isFunctionDeclaration(node) && node.name ? { name: node.name.text } : undefined,
@@ -219,10 +278,13 @@ function parseTypeScriptFile(content: string): SimplifiedProgram {
           loc: {
             start: { line: startLine },
             end: { line: endLine }
-          }
+          },
+          complexity,
+          nestingDepth: maxNesting
         };
 
         simplifiedAst.body.push(functionNode);
+        return; // Don't recurse into function body for the main visit (already handled by checkNode)
       }
 
       ts.forEachChild(node, visit);
@@ -271,13 +333,37 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
           avgParams: '0',
           functionCount: 0,
           complexityScore: 0,
-          complexityRating: 'N/A'
+          complexityRating: 'N/A',
+          codeSmells: { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 }
         };
       }
     }
 
     // Analyze the functions in the file
     const functions = analyzeFunctions(ast);
+
+    let magicNumbers = 0;
+    estraverse.traverse(ast, {
+      enter(node: any) {
+        if (node.type === 'Literal' && typeof node.value === 'number') {
+          // A magic number could be considered > 10
+          if (node.value > 10 || node.value < -10) {
+            magicNumbers++;
+          }
+        }
+      }
+    });
+
+    // Check for god file (> 500 lines)
+    const lineCount = content.split('\n').length;
+    const godFiles = lineCount > 500 ? 1 : 0;
+
+    let callbackHell = 0;
+    let excessiveParameters = 0;
+    functions.forEach(fn => {
+        if (fn.nestingDepth > 3) callbackHell++;
+        if (fn.paramCount > 4) excessiveParameters++;
+    });
 
     if (functions.length === 0) {
       return {
@@ -289,7 +375,8 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
         avgParams: '0',
         functionCount: 0,
         complexityScore: 0,
-        complexityRating: 'N/A'
+        complexityRating: 'N/A',
+        codeSmells: { magicNumbers, callbackHell, godFiles, excessiveParameters }
       };
     }
 
@@ -340,7 +427,8 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
       avgParams: avgParams.toFixed(1),
       functionCount: functions.length,
       complexityScore: Math.round(totalScore),
-      complexityRating
+      complexityRating,
+      codeSmells: { magicNumbers, callbackHell, godFiles, excessiveParameters }
     };
   } catch (error) {
     console.error(`Error analyzing file complexity for ${filePath}:`, error);
@@ -353,7 +441,8 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
       avgParams: '0',
       functionCount: 0,
       complexityScore: 0,
-      complexityRating: 'N/A'
+      complexityRating: 'N/A',
+      codeSmells: { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 }
     };
   }
 }
@@ -372,7 +461,8 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
       avgFunctionSize: '0.0',
       totalFunctions: 0,
       complexFiles: 0,
-      overallComplexity: 'N/A'
+      overallComplexity: 'N/A',
+      codeSmells: { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 }
     };
   }
 
@@ -384,6 +474,8 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
   let totalFunctions = 0;
   let complexFiles = 0;
 
+  let totalSmells = { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 };
+
   for (const file of jsFiles) {
     const filePath = path.join(projectPath, file);
     const metrics = await analyzeFileComplexity(filePath);
@@ -394,6 +486,11 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
     maxComplexityGlobal = Math.max(maxComplexityGlobal, metrics.maxComplexity);
     maxNestingDepthGlobal = Math.max(maxNestingDepthGlobal, metrics.maxNestingDepth);
     totalFunctions += metrics.functionCount;
+
+    totalSmells.magicNumbers += metrics.codeSmells.magicNumbers;
+    totalSmells.callbackHell += metrics.codeSmells.callbackHell;
+    totalSmells.godFiles += metrics.codeSmells.godFiles;
+    totalSmells.excessiveParameters += metrics.codeSmells.excessiveParameters;
 
     if (metrics.complexityRating === 'High') {
       complexFiles++;
@@ -426,6 +523,7 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
     avgFunctionSize,
     totalFunctions,
     complexFiles,
-    overallComplexity
+    overallComplexity,
+    codeSmells: totalSmells
   };
 }

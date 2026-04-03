@@ -7,6 +7,8 @@ import fs from 'fs';
 import path from 'path';
 import { analyzeProject } from '../src/index.js';
 import { formatTable } from '../src/table-formatter.js';
+import { generateHtmlReport } from '../src/html-formatter.js';
+import { writeFileSync } from 'fs';
 
 const program = new Command();
 
@@ -44,9 +46,10 @@ program
 
         const format = options.format !== 'text' ? options.format : (configOptions.format || 'text');
         const isJson = format === 'json';
-        const useColors = options.color !== false && configOptions.color !== false && !isJson;
+        const isHtml = format === 'html';
+        const useColors = options.color !== false && configOptions.color !== false && !isJson && !isHtml;
 
-        const spinner = isJson ? null : ora('Analyzing TypeScript project...').start();
+        const spinner = (isJson || isHtml) ? null : ora('Analyzing TypeScript project...').start();
 
         try {
             let extraExcludes: string[] = [];
@@ -76,6 +79,14 @@ program
                     if (key === 'formatNumber' || key === 'formattedFileTypes') return undefined;
                     return value;
                 }, 2));
+                process.exit(0);
+            }
+
+            if (isHtml) {
+                const htmlOutput = generateHtmlReport(stats);
+                const htmlReportPath = path.resolve(process.cwd(), 'ts-analyzer-report.html');
+                writeFileSync(htmlReportPath, htmlOutput);
+                console.log(`HTML report generated at: ${htmlReportPath}`);
                 process.exit(0);
             }
 
@@ -187,6 +198,23 @@ program
                     { metric: 'Complex Files', value: stats.formatNumber(stats.codeComplexity.complexFiles) },
                     { metric: 'Overall Complexity', value: complexityIndicator }
                 ]);
+
+                console.log('\n' + (useColors ? chalk.bold.magenta('Anti-Patterns & Code Smells:') : 'Anti-Patterns & Code Smells:'));
+                const hasSmells = stats.codeComplexity.codeSmells.callbackHell > 0 ||
+                    stats.codeComplexity.codeSmells.godFiles > 0 ||
+                    stats.codeComplexity.codeSmells.excessiveParameters > 0 ||
+                    stats.codeComplexity.codeSmells.magicNumbers > 0;
+
+                if (hasSmells) {
+                    formatTable([
+                        { metric: 'Callback Hell (Depth > 3)', value: stats.formatNumber(stats.codeComplexity.codeSmells.callbackHell) },
+                        { metric: 'God Files (> 500 lines)', value: stats.formatNumber(stats.codeComplexity.codeSmells.godFiles) },
+                        { metric: 'Excessive Params (> 4)', value: stats.formatNumber(stats.codeComplexity.codeSmells.excessiveParameters) },
+                        { metric: 'Magic Numbers', value: stats.formatNumber(stats.codeComplexity.codeSmells.magicNumbers) }
+                    ]);
+                } else {
+                    console.log(useColors ? chalk.green('✓ No major code smells detected.') : '✓ No major code smells detected.');
+                }
             }
 
             // Add code quality recommendations
