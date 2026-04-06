@@ -42,4 +42,10 @@ const b = 2;
     expect(stats.total).toBe(1); // fs.readFile('...') on empty string often gives 1 line array [""]
     expect(stats.code).toBe(0);
   });
+
+  it('should handle reading errors gracefully', async () => {
+    const stats = await countLines('/invalid/path/that/does/not/exist.ts');
+    expect(stats.total).toBe(0);
+    expect(stats.code).toBe(0);
+  });
 });
