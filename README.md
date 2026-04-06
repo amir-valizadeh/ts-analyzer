@@ -89,6 +89,42 @@ Some options you can use:
 - `-e, --exclude <patterns>`: Folders to ignore, separated by commas
 - `--no-safety` / `--no-complexity`: Skip specific checks to run faster
 
+## Example Reports
+
+### JSON Output
+When you run `npx ts-analyzer /path -f json`, it generates structured data you can use in your CI/CD pipelines:
+
+```json
+{
+  "files": 156,
+  "totalLines": 15234,
+  "codeLines": 12845,
+  "typescriptSafety": {
+    "tsPercentage": "84.6",
+    "avgTypeCoverage": "92.3",
+    "totalAnyCount": 12,
+    "avgTypeSafetyScore": 85,
+    "overallComplexity": "Low"
+  },
+  "codeComplexity": {
+    "avgComplexity": "3.2",
+    "maxComplexity": 12,
+    "overallComplexity": "Low",
+    "codeSmells": {
+      "magicNumbers": 0,
+      "callbackHell": 0,
+      "godFiles": 0
+    }
+  }
+}
+```
+
+### HTML Output
+When you run `npx ts-analyzer /path -f html`, it creates a `ts-analyzer-report.html` file. This acts as a beautiful visual dashboard with:
+- **Project Summary Cards**: Big, clear numbers for your total lines and code lines.
+- **Color-coded Progress Bars**: Visual bars for Type Coverage percentages (turns red if too low).
+- **Red/Green Indicators**: Fast visual checks for code smells like Callback Hell and God Files.
+
 ## Config File
 You don't have to type arguments every time. Just create a `ts-analyzer.config.json` in your project folder:
 ```json
