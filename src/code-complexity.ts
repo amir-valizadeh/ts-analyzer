@@ -161,8 +161,8 @@ function analyzeFunctions(ast: any): FunctionData[] {
   estraverse.traverse(ast, {
     enter(node: any) {
       if (node.type === 'FunctionDeclaration' ||
-          node.type === 'FunctionExpression' ||
-          node.type === 'ArrowFunctionExpression') {
+        node.type === 'FunctionExpression' ||
+        node.type === 'ArrowFunctionExpression') {
 
         // Skip functions without a body
         if (!node.body) return;
@@ -220,10 +220,10 @@ function parseTypeScriptFile(content: string): SimplifiedProgram {
   try {
     // Create a source file
     const sourceFile = ts.createSourceFile(
-        'temp.ts',
-        content,
-        ts.ScriptTarget.Latest,
-        true
+      'temp.ts',
+      content,
+      ts.ScriptTarget.Latest,
+      true
     );
 
     // Create a simplified program AST structure
@@ -235,16 +235,16 @@ function parseTypeScriptFile(content: string): SimplifiedProgram {
     // Function to visit TypeScript nodes and extract function information
     function visit(node: ts.Node) {
       if (ts.isLiteralExpression(node) && node.kind === ts.SyntaxKind.NumericLiteral) {
-          simplifiedAst.body.push({
-             type: 'Literal',
-             value: parseFloat(node.text)
-          });
+        simplifiedAst.body.push({
+          type: 'Literal',
+          value: parseFloat(node.text)
+        });
       }
 
       if (ts.isFunctionDeclaration(node) ||
-          ts.isMethodDeclaration(node) ||
-          ts.isArrowFunction(node) ||
-          ts.isFunctionExpression(node)) {
+        ts.isMethodDeclaration(node) ||
+        ts.isArrowFunction(node) ||
+        ts.isFunctionExpression(node)) {
 
         const startLine = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
         const endLine = sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line + 1;
@@ -255,43 +255,43 @@ function parseTypeScriptFile(content: string): SimplifiedProgram {
         let currentNesting = 0;
 
         function checkNode(n: ts.Node) {
-            // Complexity
-            if (ts.isIfStatement(n) || ts.isConditionalExpression(n) || ts.isCaseClause(n) ||
-                ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) ||
-                ts.isWhileStatement(n) || ts.isDoStatement(n)) {
-                complexity++;
+          // Complexity
+          if (ts.isIfStatement(n) || ts.isConditionalExpression(n) || ts.isCaseClause(n) ||
+            ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) ||
+            ts.isWhileStatement(n) || ts.isDoStatement(n)) {
+            complexity++;
+          }
+          if (ts.isBinaryExpression(n)) {
+            if (n.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+              n.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+              complexity++;
             }
-            if (ts.isBinaryExpression(n)) {
-                if (n.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
-                    n.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
-                    complexity++;
-                }
-            }
+          }
 
-            // Nesting
-            const isNestingNode = ts.isBlock(n) || ts.isIfStatement(n) || ts.isSwitchStatement(n) ||
-                                  ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) ||
-                                  ts.isWhileStatement(n) || ts.isDoStatement(n) || ts.isTryStatement(n);
+          // Nesting
+          const isNestingNode = ts.isBlock(n) || ts.isIfStatement(n) || ts.isSwitchStatement(n) ||
+            ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) ||
+            ts.isWhileStatement(n) || ts.isDoStatement(n) || ts.isTryStatement(n);
 
-            if (isNestingNode) {
-                currentNesting++;
-                maxNesting = Math.max(maxNesting, currentNesting);
-            }
+          if (isNestingNode) {
+            currentNesting++;
+            maxNesting = Math.max(maxNesting, currentNesting);
+          }
 
-            ts.forEachChild(n, checkNode);
+          ts.forEachChild(n, checkNode);
 
-            if (isNestingNode) {
-                currentNesting--;
-            }
+          if (isNestingNode) {
+            currentNesting--;
+          }
         }
 
         if (node.body) {
-            checkNode(node.body);
+          checkNode(node.body);
         }
 
         const functionNode: any = {
           type: ts.isFunctionDeclaration(node) ? 'FunctionDeclaration' :
-              ts.isArrowFunction(node) ? 'ArrowFunctionExpression' : 'FunctionExpression',
+            ts.isArrowFunction(node) ? 'ArrowFunctionExpression' : 'FunctionExpression',
           id: ts.isFunctionDeclaration(node) && node.name ? { name: node.name.text } : undefined,
           params: node.parameters ? node.parameters.map(() => ({})) : [],
           body: { type: 'BlockStatement', body: [] as any[] },
@@ -362,20 +362,20 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
 
     // Analyze the functions in the file
     const functions = analyzeFunctions(ast);
-    const contentLines = content.split('\\n');
+    const contentLines = content.split('\n');
 
     // Generate duplicate code hashes
     functions.forEach(fn => {
-        if (fn.lineCount >= 3 && fn.startLine > 0 && fn.endLine > 0) {
-            // Extract exact code and strip whitespace for agnostic comparison
-            let codeBlock = contentLines.slice(fn.startLine - 1, fn.endLine).join('\\n');
-            
-            // Strip out varying function names robustly using regex
-            codeBlock = codeBlock.replace(/function\\s+[a-zA-Z0-9_$]+/g, 'function anon');
-            codeBlock = codeBlock.replace(/(const|let|var)\\s+[a-zA-Z0-9_$]+\\s*=\\s*(async\\s*)?\\(/g, '$1 anon = $2(');
-            
-            fn.hash = codeBlock.replace(/\\s+/g, '');
-        }
+      if (fn.lineCount >= 3 && fn.startLine > 0 && fn.endLine > 0) {
+        // Extract exact code and strip whitespace for agnostic comparison
+        let codeBlock = contentLines.slice(fn.startLine - 1, fn.endLine).join('\n');
+
+        // Strip out varying function names robustly using regex
+        codeBlock = codeBlock.replace(/function\s+[a-zA-Z0-9_$]+/g, 'function anon');
+        codeBlock = codeBlock.replace(/(const|let|var)\s+[a-zA-Z0-9_$]+\s*=\s*(async\s*)?\(/g, '$1 anon = $2(');
+
+        fn.hash = codeBlock.replace(/\s+/g, '');
+      }
     });
 
     let magicNumbers = 0;
@@ -397,8 +397,8 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
     let callbackHell = 0;
     let excessiveParameters = 0;
     functions.forEach(fn => {
-        if (fn.nestingDepth > 3) callbackHell++;
-        if (fn.paramCount > 4) excessiveParameters++;
+      if (fn.nestingDepth > 3) callbackHell++;
+      if (fn.paramCount > 4) excessiveParameters++;
     });
 
     if (functions.length === 0) {
@@ -445,9 +445,9 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
     const paramsScore = Math.min((avgParams / 6) * 100, 100);
 
     const totalScore = (complexityScore * complexityWeight) +
-        (nestingScore * nestingWeight) +
-        (sizeScore * sizeWeight) +
-        (paramsScore * paramsWeight);
+      (nestingScore * nestingWeight) +
+      (sizeScore * sizeWeight) +
+      (paramsScore * paramsWeight);
 
     // Define complexity rating
     let complexityRating: string;
@@ -523,17 +523,17 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
 
     // Track for clones
     metrics.functions.forEach(fn => {
-        if (fn.hash) {
-            if (!globalFunctionHashes.has(fn.hash)) {
-                globalFunctionHashes.set(fn.hash, []);
-            }
-            globalFunctionHashes.get(fn.hash)!.push({
-                filePath: file,
-                startLine: fn.startLine,
-                endLine: fn.endLine,
-                functionName: fn.name
-            });
+      if (fn.hash) {
+        if (!globalFunctionHashes.has(fn.hash)) {
+          globalFunctionHashes.set(fn.hash, []);
         }
+        globalFunctionHashes.get(fn.hash)!.push({
+          filePath: file,
+          startLine: fn.startLine,
+          endLine: fn.endLine,
+          functionName: fn.name
+        });
+      }
     });
 
     totalComplexity += parseFloat(metrics.avgComplexity) * metrics.functionCount;
@@ -574,11 +574,11 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
   const clones: DuplicateClone[] = [];
   let totalDuplicateLines = 0;
   for (const instances of globalFunctionHashes.values()) {
-      if (instances.length > 1) {
-          const lines = instances[0].endLine - instances[0].startLine + 1;
-          clones.push({ lines, instances });
-          totalDuplicateLines += lines * (instances.length - 1);
-      }
+    if (instances.length > 1) {
+      const lines = instances[0].endLine - instances[0].startLine + 1;
+      clones.push({ lines, instances });
+      totalDuplicateLines += lines * (instances.length - 1);
+    }
   }
 
   return {
@@ -593,9 +593,9 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
     overallComplexity,
     codeSmells: totalSmells,
     duplicateCode: {
-        totalClones: clones.length,
-        totalDuplicateLines,
-        clones
+      totalClones: clones.length,
+      totalDuplicateLines,
+      clones
     }
   };
 }
