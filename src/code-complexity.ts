@@ -28,6 +28,14 @@ interface FunctionData {
   nestingDepth: number;
   paramCount: number;
   lineCount: number;
+  startLine: number;
+  endLine: number;
+  hash?: string;
+}
+
+export interface DuplicateClone {
+  lines: number;
+  instances: Array<{ filePath: string; startLine: number; endLine: number; functionName: string }>;
 }
 
 export interface FileComplexityMetrics {
@@ -40,6 +48,7 @@ export interface FileComplexityMetrics {
   functionCount: number;
   complexityScore: number;
   complexityRating: string;
+  functions: FunctionData[];
   codeSmells: {
     magicNumbers: number;
     callbackHell: number;
@@ -63,6 +72,11 @@ export interface CodeComplexityMetrics {
     callbackHell: number;
     godFiles: number;
     excessiveParameters: number;
+  };
+  duplicateCode: {
+    totalClones: number;
+    totalDuplicateLines: number;
+    clones: DuplicateClone[];
   };
 }
 
@@ -176,8 +190,12 @@ function analyzeFunctions(ast: any): FunctionData[] {
 
         // Estimate function size (lines)
         let lineCount = 0;
+        let startLine = 0;
+        let endLine = 0;
         if (node.loc) {
-          lineCount = node.loc.end.line - node.loc.start.line + 1;
+          startLine = node.loc.start.line;
+          endLine = node.loc.end.line;
+          lineCount = endLine - startLine + 1;
         }
 
         functions.push({
@@ -186,7 +204,9 @@ function analyzeFunctions(ast: any): FunctionData[] {
           complexity: node.complexity || complexity,
           nestingDepth: node.nestingDepth || nestingDepth,
           paramCount,
-          lineCount
+          lineCount,
+          startLine,
+          endLine
         });
       }
     }
@@ -341,6 +361,16 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
 
     // Analyze the functions in the file
     const functions = analyzeFunctions(ast);
+    const contentLines = content.split('\\n');
+
+    // Generate duplicate code hashes
+    functions.forEach(fn => {
+        if (fn.lineCount >= 5 && fn.startLine > 0 && fn.endLine > 0) {
+            // Extract exact code and strip whitespace for agnostic comparison
+            const codeBlock = contentLines.slice(fn.startLine - 1, fn.endLine).join('\\n');
+            fn.hash = codeBlock.replace(/\\s+/g, '');
+        }
+    });
 
     let magicNumbers = 0;
     estraverse.traverse(ast, {
@@ -376,6 +406,7 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
         functionCount: 0,
         complexityScore: 0,
         complexityRating: 'N/A',
+        functions: [],
         codeSmells: { magicNumbers, callbackHell, godFiles, excessiveParameters }
       };
     }
@@ -428,6 +459,7 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
       functionCount: functions.length,
       complexityScore: Math.round(totalScore),
       complexityRating,
+      functions,
       codeSmells: { magicNumbers, callbackHell, godFiles, excessiveParameters }
     };
   } catch (error) {
@@ -442,6 +474,7 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
       functionCount: 0,
       complexityScore: 0,
       complexityRating: 'N/A',
+      functions: [],
       codeSmells: { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 }
     };
   }
@@ -462,7 +495,8 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
       totalFunctions: 0,
       complexFiles: 0,
       overallComplexity: 'N/A',
-      codeSmells: { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 }
+      codeSmells: { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 },
+      duplicateCode: { totalClones: 0, totalDuplicateLines: 0, clones: [] }
     };
   }
 
@@ -475,10 +509,26 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
   let complexFiles = 0;
 
   let totalSmells = { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 };
+  const globalFunctionHashes = new Map<string, Array<{ filePath: string; startLine: number; endLine: number; functionName: string }>>();
 
   for (const file of jsFiles) {
     const filePath = path.join(projectPath, file);
     const metrics = await analyzeFileComplexity(filePath);
+
+    // Track for clones
+    metrics.functions.forEach(fn => {
+        if (fn.hash) {
+            if (!globalFunctionHashes.has(fn.hash)) {
+                globalFunctionHashes.set(fn.hash, []);
+            }
+            globalFunctionHashes.get(fn.hash)!.push({
+                filePath: file,
+                startLine: fn.startLine,
+                endLine: fn.endLine,
+                functionName: fn.name
+            });
+        }
+    });
 
     totalComplexity += parseFloat(metrics.avgComplexity) * metrics.functionCount;
     totalNestingDepth += parseFloat(metrics.avgNestingDepth) * metrics.functionCount;
@@ -514,6 +564,17 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
     overallComplexity = 'High';
   }
 
+  // Calculate global duplication metrics
+  const clones: DuplicateClone[] = [];
+  let totalDuplicateLines = 0;
+  for (const instances of globalFunctionHashes.values()) {
+      if (instances.length > 1) {
+          const lines = instances[0].endLine - instances[0].startLine + 1;
+          clones.push({ lines, instances });
+          totalDuplicateLines += lines * (instances.length - 1);
+      }
+  }
+
   return {
     analyzedFiles: jsFiles.length,
     avgComplexity,
@@ -524,6 +585,11 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
     totalFunctions,
     complexFiles,
     overallComplexity,
-    codeSmells: totalSmells
+    codeSmells: totalSmells,
+    duplicateCode: {
+        totalClones: clones.length,
+        totalDuplicateLines,
+        clones
+    }
   };
 }
