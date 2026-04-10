@@ -354,6 +354,7 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
           functionCount: 0,
           complexityScore: 0,
           complexityRating: 'N/A',
+          functions: [],
           codeSmells: { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 }
         };
       }
