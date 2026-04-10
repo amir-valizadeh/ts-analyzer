@@ -366,12 +366,14 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
 
     // Generate duplicate code hashes
     functions.forEach(fn => {
-        if (fn.lineCount >= 5 && fn.startLine > 0 && fn.endLine > 0) {
+        if (fn.lineCount >= 3 && fn.startLine > 0 && fn.endLine > 0) {
             // Extract exact code and strip whitespace for agnostic comparison
             let codeBlock = contentLines.slice(fn.startLine - 1, fn.endLine).join('\\n');
-            if (fn.name && fn.name !== 'anonymous') {
-                codeBlock = codeBlock.replace(fn.name, 'anon');
-            }
+            
+            // Strip out varying function names robustly using regex
+            codeBlock = codeBlock.replace(/function\\s+[a-zA-Z0-9_$]+/g, 'function anon');
+            codeBlock = codeBlock.replace(/(const|let|var)\\s+[a-zA-Z0-9_$]+\\s*=\\s*(async\\s*)?\\(/g, '$1 anon = $2(');
+            
             fn.hash = codeBlock.replace(/\\s+/g, '');
         }
     });
