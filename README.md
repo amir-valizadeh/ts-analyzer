@@ -12,7 +12,7 @@
 
 - **Type Safety Checks**: It calculates your real type coverage. It tracks things like `any` usage, generics, and assertions.
 - **Code Complexity**: It checks how hard your code is to read by measuring cyclomatic complexity and nested blocks.
-- **Anti-patterns**: It spots bad practices like Magic Numbers, Callback Hell, huge files, and functions with too many parameters.
+- **Anti-patterns**: It spots bad practices like Magic Numbers, Callback Hell, Duplicate Code, huge files, and functions with too many parameters.
 - **Reports**: You can view the results as a nice HTML page, JSON, or just plain text in your terminal.
 - **Tested**: The project has around 88% test coverage using Vitest.
 
@@ -68,6 +68,7 @@ It looks at your functions to see how complicated they are:
 1. **Cyclomatic Complexity**: How many different paths your code can take.
 2. **Nesting Depth**: How many blocks are inside each other (to avoid Callback Hell).
 3. **Size**: How many lines and parameters your functions have.
+4. **Duplicate Code**: It checks for structural clones and exactly repeated function logic across multiple files in your codebase.
 
 Based on this, it gives a rating: <30 is simple, 30-60 is moderate, and >60 means it's too complex.
 
@@ -113,7 +114,13 @@ When you run `npx ts-analyzer /path -f json`, it generates structured data you c
     "codeSmells": {
       "magicNumbers": 0,
       "callbackHell": 0,
+      "excessiveParameters": 0,
       "godFiles": 0
+    },
+    "duplicateCode": {
+      "totalClones": 2,
+      "totalDuplicateLines": 24,
+      "clones": []
     }
   }
 }
