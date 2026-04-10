@@ -368,7 +368,10 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
     functions.forEach(fn => {
         if (fn.lineCount >= 5 && fn.startLine > 0 && fn.endLine > 0) {
             // Extract exact code and strip whitespace for agnostic comparison
-            const codeBlock = contentLines.slice(fn.startLine - 1, fn.endLine).join('\\n');
+            let codeBlock = contentLines.slice(fn.startLine - 1, fn.endLine).join('\\n');
+            if (fn.name && fn.name !== 'anonymous') {
+                codeBlock = codeBlock.replace(fn.name, 'anon');
+            }
             fn.hash = codeBlock.replace(/\\s+/g, '');
         }
     });
