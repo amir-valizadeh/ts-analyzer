@@ -146,6 +146,12 @@ export function generateHtmlReport(stats: ProjectStats): string {
                     <h3>Magic Numbers</h3>
                     <div class="value" style="color: ${stats.codeComplexity.codeSmells.magicNumbers > 0 ? '#ffc107' : '#28a745'}">${stats.formatNumber(stats.codeComplexity.codeSmells.magicNumbers)}</div>
                 </div>
+                ${stats.codeComplexity.duplicateCode ? `
+                <div class="card">
+                    <h3>Duplicate Code</h3>
+                    <div class="value" style="color: ${stats.codeComplexity.duplicateCode.totalDuplicateLines > 0 ? '#dc3545' : '#28a745'}">${stats.formatNumber(stats.codeComplexity.duplicateCode.totalDuplicateLines)} <span style="font-size: 14px; font-weight: normal; color: #6c757d">lines</span></div>
+                </div>
+                ` : ''}
             </div>
         ` : ''}
 

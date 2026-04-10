@@ -24,7 +24,7 @@ interface ProgramOptions {
 program
     .name('ts-analyzer')
     .description('Comprehensive TypeScript code analyzer with type safety and complexity metrics')
-    .version('1.2.0')
+    .version('1.4.0')
     .argument('[dir]', 'project directory to analyze', '.')
     .option('-e, --exclude <patterns>', 'additional patterns to exclude (comma-separated)')
     .option('-i, --include <extensions>', 'additional file extensions to include (comma-separated)')
@@ -203,15 +203,25 @@ program
                 const hasSmells = stats.codeComplexity.codeSmells.callbackHell > 0 ||
                     stats.codeComplexity.codeSmells.godFiles > 0 ||
                     stats.codeComplexity.codeSmells.excessiveParameters > 0 ||
-                    stats.codeComplexity.codeSmells.magicNumbers > 0;
+                    stats.codeComplexity.codeSmells.magicNumbers > 0 ||
+                    (stats.codeComplexity.duplicateCode && stats.codeComplexity.duplicateCode.totalDuplicateLines > 0);
 
                 if (hasSmells) {
-                    formatTable([
+                    const smellsTable = [
                         { metric: 'Callback Hell (Depth > 3)', value: stats.formatNumber(stats.codeComplexity.codeSmells.callbackHell) },
                         { metric: 'God Files (> 500 lines)', value: stats.formatNumber(stats.codeComplexity.codeSmells.godFiles) },
                         { metric: 'Excessive Params (> 4)', value: stats.formatNumber(stats.codeComplexity.codeSmells.excessiveParameters) },
                         { metric: 'Magic Numbers', value: stats.formatNumber(stats.codeComplexity.codeSmells.magicNumbers) }
-                    ]);
+                    ];
+
+                    if (stats.codeComplexity.duplicateCode) {
+                        smellsTable.push({
+                            metric: 'Duplicate Code (Lines)',
+                            value: `${stats.formatNumber(stats.codeComplexity.duplicateCode.totalDuplicateLines)} lines in ${stats.codeComplexity.duplicateCode.totalClones} clones`
+                        });
+                    }
+
+                    formatTable(smellsTable);
                 } else {
                     console.log(useColors ? chalk.green('✓ No major code smells detected.') : '✓ No major code smells detected.');
                 }
@@ -283,6 +293,12 @@ program
                         recommendations.push(useColors
                             ? chalk.yellow(`• Address high complexity in ${stats.codeComplexity.complexFiles} files with potential technical debt`)
                             : `• Address high complexity in ${stats.codeComplexity.complexFiles} files with potential technical debt`);
+                    }
+
+                    if (stats.codeComplexity.duplicateCode && stats.codeComplexity.duplicateCode.totalDuplicateLines > 0) {
+                        recommendations.push(useColors
+                            ? chalk.yellow(`• Extract duplicated code (${stats.codeComplexity.duplicateCode.totalDuplicateLines} duplicate lines) into shared helper functions or utilities`)
+                            : `• Extract duplicated code (${stats.codeComplexity.duplicateCode.totalDuplicateLines} duplicate lines) into shared helper functions or utilities`);
                     }
                 }
 
