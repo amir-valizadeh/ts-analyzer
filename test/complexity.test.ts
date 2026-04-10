@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { analyzeFileComplexity } from '../src/code-complexity.js';
+import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest';
+import { analyzeFileComplexity, calculateProjectComplexity } from '../src/code-complexity.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -72,5 +72,47 @@ function manyParams(a, b, c, d, e, f) {
         const metrics = await analyzeFileComplexity(testFilePath);
 
         expect(metrics.codeSmells.excessiveParameters).toBe(1);
+    });
+});
+
+describe('calculateProjectComplexity', () => {
+    const testDir = path.join(process.cwd(), 'temp_complexity_project_test_dir');
+
+    beforeAll(async () => {
+        await fs.mkdir(testDir, { recursive: true });
+        
+        const file1Content = `
+export function helperFunc1(a: number, b: number) {
+    if (a > b) {
+        return a * 2;
+    }
+    return b * 2;
+}
+`;
+        
+        // Exact duplicate
+        const file2Content = `
+export function redundantFunc(a: number, b: number) {
+    if (a > b) {
+        return a * 2;
+    }
+    return b * 2;
+}
+`;
+
+        await fs.writeFile(path.join(testDir, 'file1.ts'), file1Content);
+        await fs.writeFile(path.join(testDir, 'file2.ts'), file2Content);
+    });
+
+    afterAll(async () => {
+        await fs.rm(testDir, { recursive: true, force: true });
+    });
+
+    it('should detect duplicate code across files', async () => {
+        const metrics = await calculateProjectComplexity(testDir, ['file1.ts', 'file2.ts']);
+        
+        expect(metrics).not.toBeNull();
+        expect(metrics.duplicateCode.totalClones).toBeGreaterThan(0);
+        expect(metrics.duplicateCode.totalDuplicateLines).toBeGreaterThan(4);
     });
 });
