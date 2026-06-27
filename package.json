@@ -2,7 +2,7 @@
   "name": "ts-analyzer",
   "version": "1.4.0",
   "repository": "github:amir-valizadeh/ts-analyzer",
-  "description": "Comprehensive TypeScript code analyzer with type safety and complexity metrics",
+  "description": "Static code analyzer for TypeScript and JavaScript. Measures type coverage, type safety score, cyclomatic complexity, duplicate code, and detects code smells / anti-patterns.",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "type": "module",
@@ -28,7 +28,13 @@
     "react",
     "angular",
     "vue",
-    "node"
+    "node",
+    "type-coverage",
+    "cyclomatic-complexity",
+    "code-smells",
+    "duplicate-code-detector",
+    "ast-analyzer",
+    "typescript-metrics"
   ],
   "author": "Amir Valizadeh",
   "license": "MIT",
