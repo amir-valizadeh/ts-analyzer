@@ -1,6 +1,6 @@
 {
   "name": "ts-analyzer",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "repository": "github:amir-valizadeh/ts-analyzer",
   "description": "Static code analyzer for TypeScript and JavaScript. Measures type coverage, type safety score, cyclomatic complexity, duplicate code, and detects code smells / anti-patterns.",
   "main": "dist/src/index.js",
