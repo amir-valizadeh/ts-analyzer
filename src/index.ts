@@ -3,6 +3,10 @@ import path from 'path';
 
 import { calculateProjectTypeSafety, TypeScriptSafetyMetrics } from './typescript-safety.js';
 import { calculateProjectComplexity, CodeComplexityMetrics } from './code-complexity.js';
+import { generateContextOutline } from './context-mapper.js';
+import { generateRules, RulesGeneratorOptions } from './rules-generator.js';
+
+export { generateContextOutline, generateRules, RulesGeneratorOptions };
 
 export const REACT_EXTENSIONS = [
     '.js', '.jsx', '.ts', '.tsx',
@@ -64,6 +68,7 @@ export interface ProjectStats {
     typescriptSafety: TypeScriptSafetyMetrics | null;
     codeComplexity: CodeComplexityMetrics | null;
     formatNumber: (num: number) => string;
+    allFilePaths?: string[];
 }
 
 export async function countLines(filePath: string): Promise<LineCount> {
@@ -154,6 +159,8 @@ export async function analyzeProject(projectPath = '.', options: ProjectOptions 
     }
 
     await traverse(projectPath);
+
+    stats.allFilePaths = allFilePaths;
 
     stats.formattedFileTypes = Object.entries(stats.fileTypes)
         .sort(([, a], [, b]) => b.files - a.files)
