@@ -130,10 +130,11 @@ ts-analyzer /path/to/project
 
 | Option | Shortcut | Description |
 | :--- | :---: | :--- |
-| `--format <type>` | `-f` | Output format: `text`, `json`, or `html` |
+| `--format <type>` | `-f` | Output format: `text`, `json`, `html`, or `context` |
 | `--exclude <folders>` | `-e` | Folders to ignore, comma-separated (e.g. `node_modules,dist,.next`) |
 | `--no-safety` | | Skip TypeScript type safety calculations for faster runs |
 | `--no-complexity` | | Skip code complexity and anti-pattern analysis |
+| `--init-rules [type]` | | Generate customized AI coding rules (`cursorrules`, `claudeprompt`, or `both`) |
 
 ---
 
@@ -194,6 +195,19 @@ Generate a responsive web dashboard using `-f html` which saves as `ts-analyzer-
 - **Project Summary Cards**: Visual highlights of total files, line counts, and comments.
 - **Type Safety Score Progress Bars**: Quick visual representation of code safety levels.
 - **Code Smell Warning Badges**: Colored status flags indicating potential structural design issues.
+
+### AI Context Map
+Generate a condensed outline of the project's types, exports, and relationships using `-f context`. This outline tree is optimized to give chat LLMs (such as Cursor, Claude, or Gemini) deep system context in a single small file, avoiding token bloat:
+```bash
+ts-analyzer -f context > project-context.md
+```
+
+### AI Rules Generator
+Create custom editor rule files (`.cursorrules` or `.claudeprompt`) tailored specifically to the metrics and health of your codebase:
+```bash
+ts-analyzer --init-rules both
+```
+This command analyzes your code quality metrics (e.g., cyclomatic complexity, nesting depth, type safety score) and builds strict, contextual prompts guiding your AI editor to write clean, type-safe, and low-complexity code from day one.
 
 ---
 

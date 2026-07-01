@@ -20,10 +20,10 @@ graph TD
 ## 🛠️ Phase 1: AI Context & Editor Rules (Token-Saver)
 *Optimize the codebase structure to feed AI tools (Cursor, Claude, Gemini) high-density context without blowing token limits.*
 
-- [ ] **`.cursorrules` / AI Rules Generator (`ts-analyzer --init-rules`)**
+- [x] **`.cursorrules` / AI Rules Generator (`ts-analyzer --init-rules`)**
   * **Description**: Analyzes codebase patterns and automatically generates custom `.cursorrules` or `.claudeprompt` files tailored to the repository's needs.
   * **Vibe Benefit**: Guides your editor's AI to write code that adheres to your complexity and safety guidelines from day one.
-- [ ] **AI Context Mapping (`--format context`)**
+- [x] **AI Context Mapping (`--format context`)**
   * **Description**: Compiles a highly-condensed outline of the project's types, exports, and directory relationships.
   * **Vibe Benefit**: Gives chat LLMs deep system awareness in a single small file, avoiding the need to upload files manually.
 

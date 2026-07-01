@@ -1,6 +1,6 @@
 {
   "name": "ts-analyzer",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "repository": "github:amir-valizadeh/ts-analyzer",
   "description": "Static code analyzer for TypeScript and JavaScript. Measures type coverage, type safety score, cyclomatic complexity, duplicate code, and detects code smells / anti-patterns.",
   "main": "dist/src/index.js",
@@ -9,6 +9,9 @@
   "bin": {
     "ts-analyzer": "dist/bin/cli.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "prepare": "npm run build",
