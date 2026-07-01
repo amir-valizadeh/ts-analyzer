@@ -5,7 +5,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import fs from 'fs';
 import path from 'path';
-import { analyzeProject } from '../src/index.js';
+import { analyzeProject, generateContextOutline, generateRules } from '../src/index.js';
 import { formatTable } from '../src/table-formatter.js';
 import { generateHtmlReport } from '../src/html-formatter.js';
 import { writeFileSync } from 'fs';
@@ -19,19 +19,21 @@ interface ProgramOptions {
     safety?: boolean;
     complexity?: boolean;
     format?: string;
+    initRules?: boolean | string;
 }
 
 program
     .name('ts-analyzer')
     .description('Comprehensive TypeScript code analyzer with type safety and complexity metrics')
-    .version('1.4.0')
+    .version('1.5.0')
     .argument('[dir]', 'project directory to analyze', '.')
     .option('-e, --exclude <patterns>', 'additional patterns to exclude (comma-separated)')
     .option('-i, --include <extensions>', 'additional file extensions to include (comma-separated)')
     .option('--no-color', 'disable colored output')
     .option('--no-safety', 'disable TypeScript safety analysis')
     .option('--no-complexity', 'disable code complexity analysis')
-    .option('-f, --format <type>', 'output format (text or json)', 'text')
+    .option('-f, --format <type>', 'output format (text, json, html, or context)', 'text')
+    .option('--init-rules [type]', 'generate AI coding rules (cursorrules, claudeprompt, or both)')
     .action(async (dir: string, options: ProgramOptions) => {
         let configOptions: any = {};
         try {
@@ -47,9 +49,10 @@ program
         const format = options.format !== 'text' ? options.format : (configOptions.format || 'text');
         const isJson = format === 'json';
         const isHtml = format === 'html';
-        const useColors = options.color !== false && configOptions.color !== false && !isJson && !isHtml;
+        const isContext = format === 'context';
+        const useColors = options.color !== false && configOptions.color !== false && !isJson && !isHtml && !isContext;
 
-        const spinner = (isJson || isHtml) ? null : ora('Analyzing TypeScript project...').start();
+        const spinner = (isJson || isHtml || isContext || options.initRules !== undefined) ? null : ora('Analyzing TypeScript project...').start();
 
         try {
             let extraExcludes: string[] = [];
@@ -73,6 +76,40 @@ program
                 analyzeSafety,
                 analyzeComplexity
             });
+
+            if (options.initRules !== undefined) {
+                const initSpinner = ora('Generating AI rules tailored to codebase...').start();
+                try {
+                    const ruleFormat = typeof options.initRules === 'string' ? options.initRules : 'cursorrules';
+                    if (ruleFormat !== 'cursorrules' && ruleFormat !== 'claudeprompt' && ruleFormat !== 'both') {
+                        initSpinner.fail(`Invalid AI rules format: ${ruleFormat}. Must be cursorrules, claudeprompt, or both.`);
+                        process.exit(1);
+                    }
+                    const result = await generateRules(dir, stats, { outputFormat: ruleFormat as any });
+                    initSpinner.succeed('AI rules generated successfully!');
+                    if (result.cursorrulesPath) {
+                        console.log(`Generated: ${chalk.green(result.cursorrulesPath)}`);
+                    }
+                    if (result.claudepromptPath) {
+                        console.log(`Generated: ${chalk.green(result.claudepromptPath)}`);
+                    }
+                    process.exit(0);
+                } catch (err) {
+                    initSpinner.fail('Failed to generate AI rules');
+                    console.error(err);
+                    process.exit(1);
+                }
+            }
+
+            if (isContext) {
+                if (!stats.allFilePaths) {
+                    console.error('Error: Could not retrieve file paths for context mapping.');
+                    process.exit(1);
+                }
+                const contextOutline = await generateContextOutline(dir, stats.allFilePaths);
+                console.log(contextOutline);
+                process.exit(0);
+            }
 
             if (isJson) {
                 console.log(JSON.stringify(stats, (key, value) => {
