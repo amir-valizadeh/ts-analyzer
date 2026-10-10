@@ -108,6 +108,109 @@ describe('generateHtmlReport', () => {
         expect(html).toContain('#ffc107'); // magicNumbers uses warning color
         expect(html).toContain('#dc3545'); // danger color
     });
+
+    it('should include dependencies section and display warnings when dependencies are present', () => {
+        const mockStats: Partial<ProjectStats> = {
+            files: 3,
+            totalLines: 150,
+            codeLines: 100,
+            commentLines: 20,
+            emptyLines: 30,
+            formatNumber: (n) => n.toString(),
+            formattedFileTypes: [],
+            dependencies: {
+                totalFilesAnalyzed: 3,
+                circularDependencyCount: 1,
+                circularDependencies: [
+                    {
+                        cycle: ['a.ts', 'b.ts', 'a.ts'],
+                        formattedCycle: 'a.ts -> b.ts -> a.ts',
+                        length: 2
+                    }
+                ],
+                unusedExportCount: 2,
+                unusedExports: [
+                    { file: 'a.ts', exportName: 'unusedFn', line: 10 },
+                    { file: 'b.ts', exportName: 'deadVar', line: 5 }
+                ],
+                dependencyGraph: {
+                    'a.ts': ['b.ts'],
+                    'b.ts': ['a.ts']
+                }
+            }
+        };
+
+        const html = generateHtmlReport(mockStats as ProjectStats);
+        expect(html).toContain('Dependencies & Architecture Health');
+        expect(html).toContain('Circular Dependency Cycles');
+        expect(html).toContain('a.ts -> b.ts -> a.ts');
+        expect(html).toContain('Unused / Dead Exports');
+        expect(html).toContain('unusedFn');
+        expect(html).toContain('deadVar');
+        expect(html).toContain('Actionable Guidance');
+    });
+
+    it('should display PASSED quality gate status banner when qualityGateResult.passed is true', () => {
+        const mockStats: Partial<ProjectStats> = {
+            files: 2,
+            totalLines: 100,
+            codeLines: 80,
+            commentLines: 10,
+            emptyLines: 10,
+            formatNumber: (n) => n.toString(),
+            formattedFileTypes: [],
+            qualityGateResult: {
+                passed: true,
+                thresholds: { minTypeSafetyScore: 80 },
+                violations: [],
+                summaryMarkdown: '# Passed'
+            }
+        };
+
+        const html = generateHtmlReport(mockStats as ProjectStats);
+        expect(html).toContain('Quality Gate: PASSED');
+        expect(html).toContain('quality-gate-passed');
+        expect(html).toContain('All quality gate checks passed successfully');
+    });
+
+    it('should display FAILED quality gate status banner with violations when qualityGateResult.passed is false', () => {
+        const mockStats: Partial<ProjectStats> = {
+            files: 2,
+            totalLines: 100,
+            codeLines: 80,
+            commentLines: 10,
+            emptyLines: 10,
+            formatNumber: (n) => n.toString(),
+            formattedFileTypes: [],
+            qualityGateResult: {
+                passed: false,
+                thresholds: { minTypeSafetyScore: 90, failOnCircular: true },
+                violations: [
+                    {
+                        rule: 'minTypeSafetyScore',
+                        expected: '>= 90',
+                        actual: '75',
+                        severity: 'error'
+                    },
+                    {
+                        rule: 'failOnCircular',
+                        expected: '0 circular dependencies',
+                        actual: '2 circular dependencies',
+                        severity: 'error'
+                    }
+                ],
+                summaryMarkdown: '# Failed'
+            }
+        };
+
+        const html = generateHtmlReport(mockStats as ProjectStats);
+        expect(html).toContain('Quality Gate: FAILED');
+        expect(html).toContain('quality-gate-failed');
+        expect(html).toContain('minTypeSafetyScore');
+        expect(html).toContain('failOnCircular');
+        expect(html).toContain('2</strong> quality gate violation(s) detected');
+    });
 });
+
 
 

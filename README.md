@@ -35,6 +35,8 @@ Upgrade your code quality tracking beyond simple line counting to comprehensive 
 - 📉 **Cyclomatic Complexity Measurement**: Analyzes structural paths in your control flow graph to rate how maintainable and testable your functions are.
 - 🔍 **Code Smell & Anti-Pattern Detection**: Automatically flags Callback Hell, Magic Numbers, Excessive Parameters (>4), and "God Files" (>500 lines).
 - 👯 **Duplicate Code Finder**: Scans files for structural duplicates and cloned logic blocks across your codebase.
+- 🕸 **Circular Dependency Detection**: Parses module import graphs to locate dependency cycles (`A -> B -> A`), preventing runtime initialization bugs.
+- 🧟 **Dead Code & Unused Exports**: Pinpoints exported functions, types, and variables that are never imported anywhere in the project.
 - 📋 **Multiple Output Formats**: Supports clean terminal tables (`text`), structured data (`json`), or interactive HTML dashboards (`html`).
 - ⚡ **Strict tsconfig Checker**: Evaluates configuration flags (`strict`, `noImplicitAny`, etc.) and awards bonus points for stricter setups.
 
@@ -130,17 +132,27 @@ ts-analyzer /path/to/project
 
 | Option | Shortcut | Description |
 | :--- | :---: | :--- |
+| `--check` | | Run standard CI/CD Quality Gate checks |
+| `--min-safety <score>` | | Minimum Type Safety Score required (0-100) |
+| `--min-coverage <percent>` | | Minimum Type Coverage percentage required (0-100) |
+| `--max-complexity <num>` | | Maximum average cyclomatic complexity allowed |
+| `--fail-on-circular` | | Fail quality gate if any circular dependencies exist |
+| `--fail-on-dead-code` | | Fail quality gate if any unused exports exist |
+| `--max-clones <num>` | | Maximum duplicate code clones allowed |
+| `--compare <path>` | | Compare current run against a baseline JSON file and display diffs/regressions |
+| `--github-summary` | | Write GitHub Actions `$GITHUB_STEP_SUMMARY` markdown report and workflow annotations |
 | `--format <type>` | `-f` | Output format: `text`, `json`, `html`, or `context` |
 | `--exclude <folders>` | `-e` | Folders to ignore, comma-separated (e.g. `node_modules,dist,.next`) |
 | `--no-safety` | | Skip TypeScript type safety calculations for faster runs |
 | `--no-complexity` | | Skip code complexity and anti-pattern analysis |
+| `--no-dependencies` | | Skip circular dependency and dead code/unused export analysis |
 | `--init-rules [type]` | | Generate customized AI coding rules (`cursorrules`, `claudeprompt`, or `both`) |
 
 ---
 
 ## Configuration (`ts-analyzer.config.json`)
 
-To standardize run settings in your repository, create a `ts-analyzer.config.json` file in your project root:
+To standardize run settings and Quality Gate thresholds in your repository, configure `ts-analyzer.config.json`:
 
 ```json
 {
@@ -148,7 +160,17 @@ To standardize run settings in your repository, create a `ts-analyzer.config.jso
   "complexity": true,
   "format": "text",
   "exclude": ["node_modules", "dist", ".next", "coverage"],
-  "include": [".js", ".jsx", ".ts", ".tsx"]
+  "include": [".js", ".jsx", ".ts", ".tsx"],
+  "qualityGate": {
+    "minTypeSafetyScore": 80,
+    "minTypeCoverage": 85,
+    "maxAvgComplexity": 8,
+    "maxFunctionComplexity": 15,
+    "failOnCircular": true,
+    "failOnDeadCode": true,
+    "maxDuplicateLines": 50,
+    "maxGodFiles": 0
+  }
 }
 ```
 

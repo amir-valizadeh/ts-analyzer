@@ -1,10 +1,11 @@
-import { ProjectStats } from './index.js';
+import { ProjectStats, QualityGateResult } from './index.js';
 import process from 'process';
 import path from 'path';
 
 export function generateHtmlReport(stats: ProjectStats): string {
     const isSafetyAvailable = !!stats.typescriptSafety;
     const isComplexityAvailable = !!stats.codeComplexity;
+    const isDependenciesAvailable = !!stats.dependencies;
     
     // Calculate color classes based on thresholds
     const typeCoverageVal = isSafetyAvailable ? parseFloat(stats.typescriptSafety!.avgTypeCoverage) : 0;
@@ -21,6 +22,12 @@ export function generateHtmlReport(stats: ProjectStats): string {
 
     const complexFilesVal = isComplexityAvailable ? stats.codeComplexity!.complexFiles : 0;
     const complexFilesClass = complexFilesVal > 0 ? 'danger' : 'success';
+
+    const circularCount = isDependenciesAvailable ? stats.dependencies!.circularDependencyCount : 0;
+    const circularClass = circularCount > 0 ? 'danger' : 'success';
+
+    const unusedCount = isDependenciesAvailable ? stats.dependencies!.unusedExportCount : 0;
+    const unusedClass = unusedCount > 0 ? 'warning' : 'success';
 
     const generationDate = new Date();
 
@@ -330,6 +337,7 @@ export function generateHtmlReport(stats: ProjectStats): string {
         </header>
 
         <main>
+            ${renderQualityGateBanner(stats.qualityGateResult)}
             <!-- Project Summary -->
             <section aria-labelledby="summary-heading">
                 <h2 id="summary-heading">Project Summary</h2>
@@ -493,6 +501,103 @@ export function generateHtmlReport(stats: ProjectStats): string {
                     </div>
                 </section>
             ` : ''}
+
+            ${isDependenciesAvailable ? `
+                <!-- Dependencies & Architecture Health -->
+                <section aria-labelledby="dependencies-heading">
+                    <h2 id="dependencies-heading">Dependencies & Architecture Health</h2>
+                    <div class="grid">
+                        <div class="card">
+                            <h3>Modules Analyzed</h3>
+                            <div class="value text-primary">${stats.formatNumber(stats.dependencies!.totalFilesAnalyzed)}</div>
+                            <div style="margin-top: 12px;">
+                                <span class="badge success">Analyzed</span>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h3>Circular Dependencies</h3>
+                            <div class="value ${circularCount > 0 ? 'text-danger' : 'text-success'}">${stats.formatNumber(circularCount)}</div>
+                            <div style="margin-top: 12px;">
+                                <span class="badge ${circularClass}">
+                                    ${circularCount > 0 ? 'Action Needed' : 'Passed'}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h3>Unused Exports (Dead Code)</h3>
+                            <div class="value ${unusedCount > 0 ? 'text-warning' : 'text-success'}">${stats.formatNumber(unusedCount)}</div>
+                            <div style="margin-top: 12px;">
+                                <span class="badge ${unusedClass}">
+                                    ${unusedCount > 0 ? 'Review Needed' : 'Passed'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${stats.dependencies!.circularDependencies.length > 0 ? `
+                        <div style="margin-top: 24px;">
+                            <h3 style="margin-bottom: 8px; font-size: 16px; font-weight: 600; color: var(--danger-text);">⚠️ Circular Dependency Cycles</h3>
+                            <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 14px;">
+                                <strong>Actionable Guidance:</strong> Circular dependencies can cause undefined runtime imports, memory leaks, and brittle module evaluation order. Break cycles by extracting common types/interfaces into dedicated shared modules or using dynamic imports.
+                            </p>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th scope="col" style="width: 50px;">#</th>
+                                            <th scope="col">Cycle Dependency Path</th>
+                                            <th scope="col" style="width: 100px;">Hops</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${stats.dependencies!.circularDependencies.map((cycle, idx) => `
+                                            <tr>
+                                                <td>${idx + 1}</td>
+                                                <td><code style="font-family: monospace; color: var(--danger); font-size: 13px;">${cycle.formattedCycle || cycle.cycle.join(' &rarr; ')}</code></td>
+                                                <td><span class="badge danger">${cycle.length || cycle.cycle.length - 1} hops</span></td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${stats.dependencies!.unusedExports.length > 0 ? `
+                        <div style="margin-top: 24px;">
+                            <h3 style="margin-bottom: 8px; font-size: 16px; font-weight: 600; color: var(--warning-text);">⚠️ Unused / Dead Exports</h3>
+                            <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 14px;">
+                                <strong>Actionable Guidance:</strong> These exports are never imported or referenced across project files. Remove the <code>export</code> keyword if used only locally, or remove the dead code to improve tree-shaking and reduce bundle size.
+                            </p>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">File</th>
+                                            <th scope="col" style="width: 80px;">Line</th>
+                                            <th scope="col">Unused Identifier</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${stats.dependencies!.unusedExports.slice(0, 50).map(item => `
+                                            <tr>
+                                                <td><span class="extension-badge">${item.file}</span></td>
+                                                <td>${item.line}</td>
+                                                <td><code style="font-family: monospace; font-weight: 600; color: var(--primary);">${item.exportName}</code></td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                                ${stats.dependencies!.unusedExports.length > 50 ? `
+                                    <div style="padding: 12px 20px; font-size: 13px; color: var(--text-muted); background: var(--bg-card); border-top: 1px solid var(--border);">
+                                        Showing top 50 of ${stats.dependencies!.unusedExports.length} unused exports.
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    ` : ''}
+                </section>
+            ` : ''}
         </main>
 
         <footer>
@@ -502,3 +607,48 @@ export function generateHtmlReport(stats: ProjectStats): string {
 </body>
 </html>`;
 }
+
+function renderQualityGateBanner(qg?: QualityGateResult | null): string {
+    if (!qg) return '';
+
+    if (qg.passed) {
+        return `
+            <!-- Quality Gate Status Banner (PASSED) -->
+            <section class="quality-gate-banner quality-gate-passed" style="background: var(--success-bg); border-left: 6px solid var(--success); border-color: var(--success); padding: 24px; margin-bottom: 24px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+                    <div style="display: flex; align-items: center; gap: 14px;">
+                        <span style="font-size: 32px;" aria-hidden="true">🛡️</span>
+                        <div>
+                            <h2 style="margin: 0; color: var(--success-text); border: none; padding: 0; font-size: 22px;">Quality Gate: PASSED</h2>
+                            <p style="color: var(--success-text); margin-top: 4px; font-size: 14px; opacity: 0.9;">All quality gate checks passed successfully.</p>
+                        </div>
+                    </div>
+                    <span class="badge success" style="font-size: 14px; padding: 6px 18px; font-weight: 700;">PASSED</span>
+                </div>
+            </section>
+        `;
+    }
+
+    return `
+        <!-- Quality Gate Status Banner (FAILED) -->
+        <section class="quality-gate-banner quality-gate-failed" style="background: var(--danger-bg); border-left: 6px solid var(--danger); border-color: var(--danger); padding: 24px; margin-bottom: 24px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+                <div style="display: flex; align-items: center; gap: 14px;">
+                    <span style="font-size: 32px;" aria-hidden="true">❌</span>
+                    <div>
+                        <h2 style="margin: 0; color: var(--danger-text); border: none; padding: 0; font-size: 22px;">Quality Gate: FAILED</h2>
+                        <p style="color: var(--danger-text); margin-top: 4px; font-size: 14px; opacity: 0.9;"><strong>${qg.violations.length}</strong> quality gate violation(s) detected.</p>
+                    </div>
+                </div>
+                <span class="badge danger" style="font-size: 14px; padding: 6px 18px; font-weight: 700;">FAILED</span>
+            </div>
+            <div style="margin-top: 18px; border-top: 1px solid rgba(220, 53, 69, 0.2); padding-top: 16px;">
+                <h4 style="color: var(--danger-text); font-size: 15px; margin-bottom: 10px; font-weight: 700;">Violations:</h4>
+                <ul style="color: var(--danger-text); font-size: 14px; line-height: 1.6; margin-left: 20px;">
+                    ${qg.violations.map(v => `<li><strong>${v.rule}</strong>: expected <code>${v.expected}</code>, but got <code>${v.actual}</code></li>`).join('')}
+                </ul>
+            </div>
+        </section>
+    `;
+}
+

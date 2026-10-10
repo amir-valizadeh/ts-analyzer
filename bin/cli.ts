@@ -5,7 +5,14 @@ import chalk from 'chalk';
 import ora from 'ora';
 import fs from 'fs';
 import path from 'path';
-import { analyzeProject, generateContextOutline, generateRules } from '../src/index.js';
+import {
+    analyzeProject,
+    generateContextOutline,
+    generateRules,
+    compareWithBaseline,
+    QualityGateThresholds,
+    BaselineDiff
+} from '../src/index.js';
 import { formatTable } from '../src/table-formatter.js';
 import { generateHtmlReport } from '../src/html-formatter.js';
 import { writeFileSync } from 'fs';
@@ -18,22 +25,42 @@ interface ProgramOptions {
     color?: boolean;
     safety?: boolean;
     complexity?: boolean;
+    dependencies?: boolean;
     format?: string;
     initRules?: boolean | string;
+    check?: boolean;
+    minSafety?: string;
+    minCoverage?: string;
+    maxComplexity?: string;
+    failOnCircular?: boolean;
+    failOnDeadCode?: boolean;
+    maxClones?: string;
+    compare?: string;
+    githubSummary?: boolean;
 }
 
 program
     .name('ts-analyzer')
-    .description('Comprehensive TypeScript code analyzer with type safety and complexity metrics')
-    .version('1.5.0')
+    .description('Comprehensive TypeScript code analyzer with CI/CD Quality Gate & Regression Tracking')
+    .version('2.0.0')
     .argument('[dir]', 'project directory to analyze', '.')
     .option('-e, --exclude <patterns>', 'additional patterns to exclude (comma-separated)')
     .option('-i, --include <extensions>', 'additional file extensions to include (comma-separated)')
     .option('--no-color', 'disable colored output')
     .option('--no-safety', 'disable TypeScript safety analysis')
     .option('--no-complexity', 'disable code complexity analysis')
+    .option('--no-dependencies', 'disable dependency and circular reference analysis')
     .option('-f, --format <type>', 'output format (text, json, html, or context)', 'text')
     .option('--init-rules [type]', 'generate AI coding rules (cursorrules, claudeprompt, or both)')
+    .option('--check', 'run with standard quality gate checks')
+    .option('--min-safety <number>', 'minimum Type Safety Score (0-100)')
+    .option('--min-coverage <number>', 'minimum Type Coverage percentage (0-100)')
+    .option('--max-complexity <number>', 'maximum average cyclomatic complexity allowed')
+    .option('--fail-on-circular', 'fail if any circular dependencies exist')
+    .option('--fail-on-dead-code', 'fail if any unused exports exist')
+    .option('--max-clones <number>', 'maximum duplicate code clones allowed')
+    .option('--compare <path>', 'path to a baseline JSON file to compare against and display diffs')
+    .option('--github-summary', 'write GitHub Actions $GITHUB_STEP_SUMMARY markdown file or output annotations')
     .action(async (dir: string, options: ProgramOptions) => {
         let configOptions: any = {};
         try {
@@ -69,13 +96,86 @@ program
 
             const analyzeSafety = options.safety !== false && configOptions.safety !== false;
             const analyzeComplexity = options.complexity !== false && configOptions.complexity !== false;
+            const analyzeDependencies = options.dependencies !== false && configOptions.dependencies !== false;
+
+            const isQualityGateRequested = !!(
+                options.check ||
+                options.minSafety !== undefined ||
+                options.minCoverage !== undefined ||
+                options.maxComplexity !== undefined ||
+                options.failOnCircular !== undefined ||
+                options.failOnDeadCode !== undefined ||
+                options.maxClones !== undefined ||
+                options.githubSummary ||
+                configOptions.qualityGate
+            );
+
+            let qualityGateThresholds: QualityGateThresholds | undefined = undefined;
+
+            if (isQualityGateRequested) {
+                const thresholds: QualityGateThresholds = {};
+
+                if (options.check) {
+                    thresholds.minTypeSafetyScore = 70;
+                    thresholds.minTypeCoverage = 75;
+                    thresholds.maxAvgComplexity = 10;
+                    thresholds.failOnCircular = true;
+                }
+
+                if (configOptions.qualityGate && typeof configOptions.qualityGate === 'object') {
+                    Object.assign(thresholds, configOptions.qualityGate);
+                }
+
+                if (options.minSafety !== undefined) {
+                    thresholds.minTypeSafetyScore = parseFloat(options.minSafety);
+                }
+                if (options.minCoverage !== undefined) {
+                    thresholds.minTypeCoverage = parseFloat(options.minCoverage);
+                }
+                if (options.maxComplexity !== undefined) {
+                    thresholds.maxAvgComplexity = parseFloat(options.maxComplexity);
+                }
+                if (options.failOnCircular) {
+                    thresholds.failOnCircular = true;
+                }
+                if (options.failOnDeadCode) {
+                    thresholds.failOnDeadCode = true;
+                }
+                if (options.maxClones !== undefined) {
+                    thresholds.maxDuplicateClones = parseInt(options.maxClones, 10);
+                }
+
+                qualityGateThresholds = thresholds;
+            }
 
             const stats = await analyzeProject(dir, {
                 excludePatterns: extraExcludes,
                 additionalExtensions: extraExtensions,
                 analyzeSafety,
-                analyzeComplexity
+                analyzeComplexity,
+                analyzeDependencies,
+                qualityGate: qualityGateThresholds
             });
+
+            let baselineDiff: BaselineDiff | null = null;
+            if (options.compare) {
+                try {
+                    const baselinePath = path.resolve(process.cwd(), options.compare);
+                    if (!fs.existsSync(baselinePath)) {
+                        spinner?.fail('Comparison failed');
+                        console.error(chalk.red(`Error: Baseline file not found: ${baselinePath}`));
+                        process.exit(1);
+                    }
+                    const baselineContent = fs.readFileSync(baselinePath, 'utf8');
+                    const baselineStats = JSON.parse(baselineContent);
+                    baselineDiff = compareWithBaseline(stats, baselineStats);
+                    (stats as any).baselineDiff = baselineDiff;
+                } catch (err) {
+                    spinner?.fail('Comparison failed');
+                    console.error(chalk.red(`Error reading baseline file: ${(err as Error).message}`));
+                    process.exit(1);
+                }
+            }
 
             if (options.initRules !== undefined) {
                 const initSpinner = ora('Generating AI rules tailored to codebase...').start();
@@ -116,6 +216,12 @@ program
                     if (key === 'formatNumber' || key === 'formattedFileTypes') return undefined;
                     return value;
                 }, 2));
+                if (options.githubSummary && stats.qualityGateResult) {
+                    writeGitHubSummary(stats.qualityGateResult, baselineDiff, useColors);
+                }
+                if (stats.qualityGateResult && !stats.qualityGateResult.passed && isQualityGateRequested) {
+                    process.exit(1);
+                }
                 process.exit(0);
             }
 
@@ -124,6 +230,12 @@ program
                 const htmlReportPath = path.resolve(process.cwd(), 'ts-analyzer-report.html');
                 writeFileSync(htmlReportPath, htmlOutput);
                 console.log(`HTML report generated at: ${htmlReportPath}`);
+                if (options.githubSummary && stats.qualityGateResult) {
+                    writeGitHubSummary(stats.qualityGateResult, baselineDiff, useColors);
+                }
+                if (stats.qualityGateResult && !stats.qualityGateResult.passed && isQualityGateRequested) {
+                    process.exit(1);
+                }
                 process.exit(0);
             }
 
@@ -264,8 +376,61 @@ program
                 }
             }
 
+            // Print dependency analysis metrics if available
+            if (stats.dependencies) {
+                console.log('\n' + (useColors ? chalk.bold.green('Dependency Analysis & Module Graph:') : 'Dependency Analysis & Module Graph:'));
+
+                let circularIndicator;
+                if (stats.dependencies.circularDependencyCount === 0) {
+                    circularIndicator = useColors ? chalk.green('Passed ✓ (0 cycles)') : 'Passed ✓ (0 cycles)';
+                } else {
+                    circularIndicator = useColors ? chalk.red(`Failed ✗ (${stats.dependencies.circularDependencyCount} cycles)`) : `Failed ✗ (${stats.dependencies.circularDependencyCount} cycles)`;
+                }
+
+                let unusedIndicator;
+                if (stats.dependencies.unusedExportCount === 0) {
+                    unusedIndicator = useColors ? chalk.green('Clean ✓ (0 unused)') : 'Clean ✓ (0 unused)';
+                } else {
+                    unusedIndicator = useColors ? chalk.yellow(`Warning ⚠ (${stats.dependencies.unusedExportCount} unused)`) : `Warning ⚠ (${stats.dependencies.unusedExportCount} unused)`;
+                }
+
+                formatTable([
+                    { metric: 'Analyzed Modules', value: stats.formatNumber(stats.dependencies.totalFilesAnalyzed) },
+                    { metric: 'Circular Dependencies', value: circularIndicator },
+                    { metric: 'Unused / Dead Exports', value: unusedIndicator }
+                ]);
+
+                if (stats.dependencies.circularDependencies.length > 0) {
+                    console.log('\n' + (useColors ? chalk.bold.red('⚠️  Circular Dependency Cycles:') : '⚠️  Circular Dependency Cycles:'));
+                    const cycleRows = stats.dependencies.circularDependencies.map((c, i) => ({
+                        '#': String(i + 1),
+                        'Cycle Chain': c.formattedCycle || c.cycle.join(' -> '),
+                        'Hops': String(c.length || c.cycle.length - 1)
+                    }));
+                    formatTable(cycleRows);
+                }
+
+                if (stats.dependencies.unusedExports.length > 0) {
+                    console.log('\n' + (useColors ? chalk.bold.yellow('⚠️  Unused / Dead Exports:') : '⚠️  Unused / Dead Exports:'));
+                    const displayLimit = 15;
+                    const exportsToShow = stats.dependencies.unusedExports.slice(0, displayLimit);
+                    const unusedRows = exportsToShow.map(e => ({
+                        'File': e.file,
+                        'Line': String(e.line),
+                        'Export Name': e.exportName
+                    }));
+                    formatTable(unusedRows);
+                    if (stats.dependencies.unusedExports.length > displayLimit) {
+                        const remaining = stats.dependencies.unusedExports.length - displayLimit;
+                        console.log(useColors
+                            ? chalk.dim(`... and ${remaining} more unused export(s)`)
+                            : `... and ${remaining} more unused export(s)`);
+                    }
+                }
+            }
+
             // Add code quality recommendations
-            if (stats.typescriptSafety || stats.codeComplexity) {
+            if (stats.typescriptSafety || stats.codeComplexity || stats.dependencies) {
                 console.log('\n' + (useColors ? chalk.bold.blue('📝 Code Quality Recommendations:') : '📝 Code Quality Recommendations:'));
                 const recommendations: string[] = [];
 
@@ -339,6 +504,19 @@ program
                     }
                 }
 
+                if (stats.dependencies) {
+                    if (stats.dependencies.circularDependencyCount > 0) {
+                        recommendations.push(useColors
+                            ? chalk.red(`• Break ${stats.dependencies.circularDependencyCount} circular dependency cycle(s) to avoid runtime initialization errors and tightly coupled modules`)
+                            : `• Break ${stats.dependencies.circularDependencyCount} circular dependency cycle(s) to avoid runtime initialization errors and tightly coupled modules`);
+                    }
+                    if (stats.dependencies.unusedExportCount > 0) {
+                        recommendations.push(useColors
+                            ? chalk.yellow(`• Remove or make internal ${stats.dependencies.unusedExportCount} unreferenced export(s) to eliminate dead code and improve tree-shaking`)
+                            : `• Remove or make internal ${stats.dependencies.unusedExportCount} unreferenced export(s) to eliminate dead code and improve tree-shaking`);
+                    }
+                }
+
                 if (recommendations.length > 0) {
                     console.log(recommendations.join('\n'));
                 } else {
@@ -348,11 +526,125 @@ program
                 }
             }
 
+            // Print Baseline Diff & Regression Tracking if available
+            if (baselineDiff) {
+                console.log('\n' + (useColors ? chalk.bold.cyan('Baseline Comparison & Regression Tracking:') : 'Baseline Comparison & Regression Tracking:'));
+
+                const diffRows = [
+                    { metric: 'Type Safety Score', delta: formatDelta(baselineDiff.typeSafetyScoreDelta, true, useColors) },
+                    { metric: 'Type Coverage', delta: `${formatDelta(baselineDiff.typeCoverageDelta, true, useColors)}%` },
+                    { metric: 'Avg Complexity', delta: formatDelta(baselineDiff.avgComplexityDelta, false, useColors) },
+                    { metric: 'Circular Dependencies', delta: formatDelta(baselineDiff.circularDependencyDelta, false, useColors) },
+                    { metric: 'Unused / Dead Exports', delta: formatDelta(baselineDiff.unusedExportsDelta, false, useColors) },
+                    { metric: 'Duplicate Lines', delta: formatDelta(baselineDiff.duplicateLinesDelta, false, useColors) },
+                    { metric: 'Code Lines', delta: formatDelta(baselineDiff.codeLinesDelta, null, useColors) }
+                ];
+                formatTable(diffRows);
+
+                if (baselineDiff.regressions.length > 0) {
+                    console.log('\n' + (useColors ? chalk.bold.red('⚠️  Regressions Detected:') : '⚠️  Regressions Detected:'));
+                    for (const reg of baselineDiff.regressions) {
+                        console.log(useColors ? chalk.red(`  • ${reg}`) : `  • ${reg}`);
+                    }
+                }
+
+                if (baselineDiff.improvements.length > 0) {
+                    console.log('\n' + (useColors ? chalk.bold.green('✨ Improvements Detected:') : '✨ Improvements Detected:'));
+                    for (const imp of baselineDiff.improvements) {
+                        console.log(useColors ? chalk.green(`  • ${imp}`) : `  • ${imp}`);
+                    }
+                }
+            }
+
+            // Print Quality Gate Evaluation if available
+            if (stats.qualityGateResult) {
+                console.log('\n' + (useColors ? chalk.bold.cyan('Quality Gate Evaluation:') : 'Quality Gate Evaluation:'));
+                if (stats.qualityGateResult.passed) {
+                    console.log(useColors
+                        ? chalk.bold.green('✅ QUALITY GATE PASSED: All threshold checks satisfied!')
+                        : '✅ QUALITY GATE PASSED: All threshold checks satisfied!');
+                } else {
+                    console.log(useColors
+                        ? chalk.bold.red('❌ QUALITY GATE FAILED: Violations detected:')
+                        : '❌ QUALITY GATE FAILED: Violations detected:');
+
+                    const violationRows = stats.qualityGateResult.violations.map(v => ({
+                        'Rule': v.rule,
+                        'Expected': v.expected,
+                        'Actual': v.actual,
+                        'Severity': useColors ? chalk.bold.red(v.severity.toUpperCase()) : v.severity.toUpperCase()
+                    }));
+                    formatTable(violationRows);
+                }
+            }
+
+            if (options.githubSummary && stats.qualityGateResult) {
+                writeGitHubSummary(stats.qualityGateResult, baselineDiff, useColors);
+            }
+
+            if (stats.qualityGateResult && !stats.qualityGateResult.passed && isQualityGateRequested) {
+                process.exit(1);
+            }
+
         } catch (error) {
             spinner?.fail('Analysis failed');
             console.error(useColors ? chalk.red('Error:') : 'Error:', (error as Error).message);
             process.exit(1);
         }
     });
+
+function formatDelta(delta: number, higherIsBetter: boolean | null, useColors: boolean): string {
+    if (delta === 0) {
+        return useColors ? chalk.dim('0') : '0';
+    }
+    const formatted = delta > 0 ? `+${delta}` : `${delta}`;
+    if (!useColors || higherIsBetter === null) {
+        return formatted;
+    }
+    if (higherIsBetter) {
+        return delta > 0 ? chalk.green(formatted) : chalk.red(formatted);
+    } else {
+        return delta > 0 ? chalk.red(formatted) : chalk.green(formatted);
+    }
+}
+
+function writeGitHubSummary(
+    qg: any,
+    baselineDiff: BaselineDiff | null,
+    useColors: boolean
+) {
+    let summaryContent = qg.summaryMarkdown;
+    if (baselineDiff) {
+        summaryContent += '\n\n### 📈 Baseline Diff & Regression Tracking\n\n';
+        if (baselineDiff.regressions.length > 0) {
+            summaryContent += '#### ⚠️ Regressions\n' + baselineDiff.regressions.map(r => `- ${r}`).join('\n') + '\n\n';
+        }
+        if (baselineDiff.improvements.length > 0) {
+            summaryContent += '#### ✨ Improvements\n' + baselineDiff.improvements.map(i => `- ${i}`).join('\n') + '\n\n';
+        }
+        if (baselineDiff.regressions.length === 0 && baselineDiff.improvements.length === 0) {
+            summaryContent += '> No regressions or improvements detected compared to baseline.\n\n';
+        }
+    }
+
+    if (process.env.GITHUB_STEP_SUMMARY) {
+        try {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryContent + '\n\n');
+            console.log(useColors ? chalk.green('GitHub step summary written to $GITHUB_STEP_SUMMARY') : 'GitHub step summary written to $GITHUB_STEP_SUMMARY');
+        } catch (err) {
+            console.warn(useColors ? chalk.yellow(`Warning: Could not write to $GITHUB_STEP_SUMMARY: ${(err as Error).message}`) : `Warning: Could not write to $GITHUB_STEP_SUMMARY: ${(err as Error).message}`);
+        }
+    } else {
+        const summaryPath = path.resolve(process.cwd(), 'github-summary.md');
+        fs.writeFileSync(summaryPath, summaryContent);
+        console.log(useColors ? chalk.green(`GitHub step summary written to ${summaryPath}`) : `GitHub step summary written to ${summaryPath}`);
+    }
+
+    if (!qg.passed) {
+        for (const v of qg.violations) {
+            console.log(`::error title=Quality Gate Violation::Rule ${v.rule} failed: expected ${v.expected}, got ${v.actual}`);
+        }
+    }
+}
 
 program.parse();

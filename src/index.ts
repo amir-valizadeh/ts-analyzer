@@ -5,8 +5,38 @@ import { calculateProjectTypeSafety, TypeScriptSafetyMetrics } from './typescrip
 import { calculateProjectComplexity, CodeComplexityMetrics } from './code-complexity.js';
 import { generateContextOutline } from './context-mapper.js';
 import { generateRules, RulesGeneratorOptions } from './rules-generator.js';
+import {
+    analyzeDependencies,
+    DependencyAnalysisResult,
+    CircularDependencyCycle,
+    UnusedExport
+} from './dependency-analysis.js';
+import {
+    QualityGateThresholds,
+    QualityGateViolation,
+    QualityGateResult,
+    evaluateQualityGate
+} from './quality-gate.js';
+import {
+    BaselineDiff,
+    compareWithBaseline
+} from './baseline-diff.js';
 
-export { generateContextOutline, generateRules, RulesGeneratorOptions };
+export {
+    generateContextOutline,
+    generateRules,
+    RulesGeneratorOptions,
+    analyzeDependencies,
+    DependencyAnalysisResult,
+    CircularDependencyCycle,
+    UnusedExport,
+    QualityGateThresholds,
+    QualityGateViolation,
+    QualityGateResult,
+    evaluateQualityGate,
+    BaselineDiff,
+    compareWithBaseline
+};
 
 export const REACT_EXTENSIONS = [
     '.js', '.jsx', '.ts', '.tsx',
@@ -55,6 +85,8 @@ export interface ProjectOptions {
     additionalExtensions?: string[];
     analyzeSafety?: boolean;
     analyzeComplexity?: boolean;
+    analyzeDependencies?: boolean;
+    qualityGate?: QualityGateThresholds;
 }
 
 export interface ProjectStats {
@@ -67,6 +99,8 @@ export interface ProjectStats {
     formattedFileTypes?: FileTypeFormatted[];
     typescriptSafety: TypeScriptSafetyMetrics | null;
     codeComplexity: CodeComplexityMetrics | null;
+    dependencies: DependencyAnalysisResult | null;
+    qualityGateResult?: QualityGateResult | null;
     formatNumber: (num: number) => string;
     allFilePaths?: string[];
 }
@@ -104,6 +138,8 @@ export async function analyzeProject(projectPath = '.', options: ProjectOptions 
         fileTypes: {},
         typescriptSafety: null,
         codeComplexity: null,
+        dependencies: null,
+        qualityGateResult: null,
         formatNumber: (num: number) => num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
     };
 
@@ -181,6 +217,14 @@ export async function analyzeProject(projectPath = '.', options: ProjectOptions 
 
     if (options.analyzeComplexity !== false) {
         stats.codeComplexity = await calculateProjectComplexity(projectPath, allFilePaths);
+    }
+
+    if (options.analyzeDependencies !== false) {
+        stats.dependencies = await analyzeDependencies(projectPath, allFilePaths);
+    }
+
+    if (options.qualityGate) {
+        stats.qualityGateResult = evaluateQualityGate(stats, options.qualityGate);
     }
 
     return stats;
