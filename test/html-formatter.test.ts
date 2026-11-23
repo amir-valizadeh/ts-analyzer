@@ -210,6 +210,127 @@ describe('generateHtmlReport', () => {
         expect(html).toContain('failOnCircular');
         expect(html).toContain('2</strong> quality gate violation(s) detected');
     });
+
+    it('should render Actionable Hotspots sections and type-only cycle badge cleanly with HTML escaping', () => {
+        const mockStats: Partial<ProjectStats> = {
+            files: 4,
+            totalLines: 800,
+            codeLines: 700,
+            commentLines: 50,
+            emptyLines: 50,
+            formatNumber: (n) => n.toString(),
+            formattedFileTypes: [],
+            typescriptSafety: {
+                tsFileCount: 4,
+                tsPercentage: '100',
+                avgTypeCoverage: '82.5',
+                totalAnyCount: 3,
+                totalAssertions: 2,
+                totalNonNullAssertions: 1,
+                avgTypeSafetyScore: 78,
+                overallComplexity: 'Medium',
+                worstFiles: [
+                    {
+                        file: 'src/unsafe<script>.ts',
+                        typeSafetyScore: 62,
+                        typeCoverage: '70.0',
+                        anyCount: 3,
+                        typeAssertions: 2,
+                        nonNullAssertions: 1
+                    }
+                ]
+            },
+            codeComplexity: {
+                analyzedFiles: 4,
+                avgComplexity: '4.5',
+                maxComplexity: 18,
+                avgNestingDepth: '2.0',
+                maxNestingDepth: 5,
+                avgFunctionSize: '25.0',
+                totalFunctions: 12,
+                complexFiles: 1,
+                overallComplexity: 'Medium',
+                codeSmells: {
+                    magicNumbers: 1,
+                    callbackHell: 1,
+                    godFiles: 1,
+                    excessiveParameters: 1
+                },
+                duplicateCode: {
+                    totalClones: 1,
+                    totalDuplicateLines: 14,
+                    clones: [
+                        {
+                            lines: 14,
+                            instances: [
+                                { filePath: 'src/a.ts', startLine: 10, endLine: 23, functionName: 'dupA' },
+                                { filePath: 'src/b.ts', startLine: 30, endLine: 43, functionName: 'dupB' }
+                            ]
+                        }
+                    ]
+                },
+                topComplexFunctions: [
+                    {
+                        file: 'src/heavy.ts',
+                        name: 'processAllItems',
+                        startLine: 42,
+                        endLine: 98,
+                        cyclomaticComplexity: 18,
+                        maxNestingDepth: 5,
+                        paramCount: 6,
+                        length: 57
+                    }
+                ],
+                godFileList: [
+                    {
+                        file: 'src/monolith.ts',
+                        lines: 612
+                    }
+                ]
+            },
+            dependencies: {
+                totalFilesAnalyzed: 4,
+                circularDependencyCount: 1,
+                circularDependencies: [
+                    {
+                        cycle: ['src/typesA.ts', 'src/typesB.ts', 'src/typesA.ts'],
+                        formattedCycle: 'src/typesA.ts -> src/typesB.ts -> src/typesA.ts',
+                        length: 2,
+                        isTypeOnly: true
+                    }
+                ],
+                unusedExportCount: 0,
+                unusedExports: [],
+                dependencyGraph: {}
+            }
+        };
+
+        const html = generateHtmlReport(mockStats as ProjectStats);
+
+        // Lowest Type-Safety Files hotspot + XSS escaping
+        expect(html).toContain('Lowest Type-Safety Files');
+        expect(html).toContain('src/unsafe&lt;script&gt;.ts');
+        expect(html).not.toContain('src/unsafe<script>.ts');
+        expect(html).toContain('62/100');
+
+        // Top Complex Functions hotspot
+        expect(html).toContain('Top Complex Functions');
+        expect(html).toContain('processAllItems');
+        expect(html).toContain('src/heavy.ts');
+
+        // God Files hotspot
+        expect(html).toContain('God Files (> 500 Lines)');
+        expect(html).toContain('src/monolith.ts');
+        expect(html).toContain('612 lines');
+
+        // Duplicate Code Clones hotspot
+        expect(html).toContain('Duplicate Code Clones');
+        expect(html).toContain('src/a.ts:10-23 (dupA)');
+        expect(html).toContain('src/b.ts:30-43 (dupB)');
+
+        // Type-only circular dependency badge
+        expect(html).toContain('type-only');
+    });
 });
 
 

@@ -63,4 +63,44 @@ describe('analyzeProject', () => {
         expect(stats.fileTypes['.css']).toBeUndefined();
         expect(stats.fileTypes['.txt']).toBeDefined();
     });
+
+    it('should forward entryPoints and ignoreTypeCycles and populate hotspot fields on ProjectStats', async () => {
+        const v21Dir = path.join(testDir, 'v21_features');
+        await fs.mkdir(v21Dir, { recursive: true });
+
+        await fs.writeFile(path.join(v21Dir, 'entry.ts'), `
+            import type { HelperType } from './helper';
+            export interface EntryType { h?: HelperType; }
+            export function complexEntry(x: number, y: any): number {
+                if (x > 0) {
+                    return x + Number(y);
+                }
+                return 0;
+            }
+        `);
+        await fs.writeFile(path.join(v21Dir, 'helper.ts'), `
+            import type { EntryType } from './entry';
+            export interface HelperType { e?: EntryType; }
+            export const unusedHelper = 42;
+        `);
+
+        const defaultStats = await analyzeProject(v21Dir);
+        expect(defaultStats.dependencies?.circularDependencyCount).toBe(1);
+        expect(defaultStats.dependencies?.circularDependencies[0].isTypeOnly).toBe(true);
+        expect(defaultStats.typescriptSafety?.worstFiles).toBeDefined();
+        expect(defaultStats.typescriptSafety?.worstFiles?.length).toBeGreaterThan(0);
+        expect(defaultStats.codeComplexity?.topComplexFunctions).toBeDefined();
+        expect(defaultStats.codeComplexity?.topComplexFunctions?.some(f => f.name === 'complexEntry')).toBe(true);
+        expect(defaultStats.codeComplexity?.godFileList).toBeDefined();
+
+        const filteredStats = await analyzeProject(v21Dir, {
+            entryPoints: ['entry.ts'],
+            ignoreTypeCycles: true
+        });
+        expect(filteredStats.dependencies?.circularDependencyCount).toBe(0);
+        expect(filteredStats.dependencies?.entryPoints).toContain('entry.ts');
+        const unused = filteredStats.dependencies?.unusedExports.map(e => `${e.file}:${e.exportName}`) || [];
+        expect(unused).not.toContain('entry.ts:complexEntry');
+        expect(unused).toContain('helper.ts:unusedHelper');
+    });
 });

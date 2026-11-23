@@ -1,12 +1,12 @@
-# ts-analyzer — TypeScript Static Code Analysis & Type Safety Metrics
+# ts-analyzer — TypeScript Static Code Analysis, Type Coverage, Dead Code & Complexity CLI
 
 [![npm version](https://img.shields.io/npm/v/ts-analyzer)](https://www.npmjs.com/package/ts-analyzer)
 [![test coverage](https://img.shields.io/badge/coverage-88%25-brightgreen)](https://github.com/amir-valizadeh/ts-analyzer)
 [![license](https://img.shields.io/npm/l/ts-analyzer)](https://github.com/amir-valizadeh/ts-analyzer/blob/main/LICENSE)
 
-`ts-analyzer` is a high-performance **static code analysis tool** designed to inspect, measure, and optimize **TypeScript** and **JavaScript** codebases. By performing AST (Abstract Syntax Tree) analysis on your source files, it calculates your **type coverage**, computes a custom **type safety score**, measures **cyclomatic complexity**, identifies **duplicate code**, and flags **code smells / anti-patterns**.
+`ts-analyzer` is a zero-config **TypeScript & JavaScript static code analysis CLI**, **CI/CD Quality Gate**, and **AI Context generator**. Using the TypeScript Compiler AST, it measures **type coverage** and **type safety score**, pinpoints **cyclomatic complexity hotspots**, detects **circular dependencies** (with `tsconfig.json` `paths` alias & `import type` awareness), finds **unused exports / dead code** (with automatic `package.json` entry-point detection), and flags **duplicate code clones** and **code smells**.
 
-Upgrade your code quality tracking beyond simple line counting to comprehensive structural analysis.
+Replace stitching together 4 separate CLI tools (`type-coverage`, `madge`, `knip`, and complexity linters) with one fast, unified health check and interactive HTML dashboard.
 
 ---
 
@@ -31,29 +31,31 @@ Upgrade your code quality tracking beyond simple line counting to comprehensive 
 
 ## Key Features
 
-- 📊 **Type Safety & Coverage Analysis**: Computes your actual type coverage, penalizing overused `any` declarations, generic safety lapses, and raw type assertions.
-- 📉 **Cyclomatic Complexity Measurement**: Analyzes structural paths in your control flow graph to rate how maintainable and testable your functions are.
-- 🔍 **Code Smell & Anti-Pattern Detection**: Automatically flags Callback Hell, Magic Numbers, Excessive Parameters (>4), and "God Files" (>500 lines).
-- 👯 **Duplicate Code Finder**: Scans files for structural duplicates and cloned logic blocks across your codebase.
-- 🕸 **Circular Dependency Detection**: Parses module import graphs to locate dependency cycles (`A -> B -> A`), preventing runtime initialization bugs.
-- 🧟 **Dead Code & Unused Exports**: Pinpoints exported functions, types, and variables that are never imported anywhere in the project.
-- 📋 **Multiple Output Formats**: Supports clean terminal tables (`text`), structured data (`json`), or interactive HTML dashboards (`html`).
-- ⚡ **Strict tsconfig Checker**: Evaluates configuration flags (`strict`, `noImplicitAny`, etc.) and awards bonus points for stricter setups.
+- 📊 **Type Safety & Coverage Analysis**: Computes actual AST type coverage and a 0–100 Type Safety Score, penalizing `any` declarations, `as` type assertions, and non-null assertions (`!`).
+- 🔥 **Actionable Hotspot Drilldowns (`--hotspots` / `--top <n>`)**: Pinpoints exact `file:line` locations for the most complex functions, lowest type-safety files, God files (>500 lines), and duplicate code clones.
+- 📉 **Cyclomatic Complexity Measurement**: Analyzes top-level functions, class methods, and nested closures/hooks to rate maintainability and testability.
+- 🔍 **Code Smell & Anti-Pattern Detection**: Automatically flags Callback Hell (deep nesting), Magic Numbers, Excessive Parameters (>4), and God Files (>500 lines).
+- 👯 **Duplicate Code Finder**: Scans files for structural duplicates and cloned functions across your codebase.
+- 🕸 **Smart Circular Dependency Detection**: Parses module import graphs (including `tsconfig.json` `baseUrl` and `paths` aliases like `@/*`), distinguishes runtime cycles from `import type` cycles (`--ignore-type-cycles`), and prevents initialization bugs.
+- 🧟 **Entry-Point-Aware Dead Code & Unused Exports**: Finds exported functions, types, and variables never imported in the project while automatically respecting `package.json` (`main`, `module`, `bin`, `exports`) and custom `--entry` globs.
+- 🛡️ **CI/CD Quality Gate & Baseline Diffing**: Enforce thresholds in CI (`--check`), compare against a baseline JSON (`--compare`), and publish GitHub Actions `$GITHUB_STEP_SUMMARY` reports (`--github-summary`).
+- 📋 **Multiple Output Formats & AI Tooling**: Supports terminal ASCII tables (`text`), structured JSON (`json`), interactive HTML dashboards (`html`), compact LLM context maps (`context`), and tailored AI editor rules (`--init-rules`).
 
 ---
 
 ## Why ts-analyzer? (Comparison)
 
-Standard linting tools like ESLint and formatting tools like Prettier check code formatting and basic rules, but don't give you a unified health score or complexity map.
+Most teams stitch together separate tools for type coverage, circular dependencies, unused exports, and complexity. `ts-analyzer` unifies them in a single AST pass:
 
-| Feature / Metric | `ts-analyzer` | ESLint | react-loc-analyzer |
-| :--- | :---: | :---: | :---: |
-| **AST-Based Type Coverage** | Yes | No | No |
-| **Cyclomatic Complexity Rating** | Yes | Yes (Rules) | No |
-| **Unified Type Safety Score** | Yes | No | No |
-| **Duplicate Code Scan** | Yes | No | No |
-| **Interactive HTML Reports** | Yes | No | No |
-| **Line Counter** | Yes | No | Yes |
+| Feature / Capability | `ts-analyzer` | `knip` | `madge` | `type-coverage` | `ESLint` |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **AST Type Coverage & Safety Score (0–100)** | ✅ Yes | ❌ No | ❌ No | ✅ Coverage only | ❌ No |
+| **Cyclomatic Complexity & Function Hotspots** | ✅ Yes | ❌ No | ❌ No | ❌ No | ⚠️ Rule-only |
+| **Circular Dependency Detection (`tsconfig` paths)** | ✅ Yes (`--ignore-type-cycles`) | ❌ No | ✅ Yes | ❌ No | ⚠️ Slow (`import/no-cycle`) |
+| **Unused Exports / Dead Code (`package.json` aware)** | ✅ Yes | ✅ Yes | ❌ No | ❌ No | ❌ No |
+| **Duplicate Code Clone Detection** | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No |
+| **Built-in CI Quality Gate & Baseline Regression Diff** | ✅ Yes | ❌ No | ❌ No | ⚠️ Threshold only | ❌ No |
+| **Interactive HTML Dashboard & AI Context Map** | ✅ Yes | ❌ No | ⚠️ Graph image | ❌ No | ❌ No |
 
 ---
 
@@ -132,6 +134,10 @@ ts-analyzer /path/to/project
 
 | Option | Shortcut | Description |
 | :--- | :---: | :--- |
+| `--hotspots` | | Display detailed file/function hotspot drilldown tables (top complex functions, lowest type-safety files, God files, and duplicate code clones) |
+| `--top <n>` | | Maximum number of items to display per hotspot table (default `10`; implies `--hotspots`) |
+| `--entry <patterns>` | | Comma-separated entry point paths or globs (e.g. `src/index.ts,src/pages/**`) to exclude from unused export checks (merged with auto-detected `package.json` entry points) |
+| `--ignore-type-cycles` | | Exclude type-only (`import type` / `export type`) circular dependencies from cycle counts and quality gate failures |
 | `--check` | | Run standard CI/CD Quality Gate checks |
 | `--min-safety <score>` | | Minimum Type Safety Score required (0-100) |
 | `--min-coverage <percent>` | | Minimum Type Coverage percentage required (0-100) |
@@ -152,7 +158,7 @@ ts-analyzer /path/to/project
 
 ## Configuration (`ts-analyzer.config.json`)
 
-To standardize run settings and Quality Gate thresholds in your repository, configure `ts-analyzer.config.json`:
+To standardize run settings, custom entry points, and Quality Gate thresholds in your repository, configure `ts-analyzer.config.json`:
 
 ```json
 {
@@ -161,6 +167,8 @@ To standardize run settings and Quality Gate thresholds in your repository, conf
   "format": "text",
   "exclude": ["node_modules", "dist", ".next", "coverage"],
   "include": [".js", ".jsx", ".ts", ".tsx"],
+  "entryPoints": ["src/index.ts", "src/pages/**", "src/app/**"],
+  "ignoreTypeCycles": true,
   "qualityGate": {
     "minTypeSafetyScore": 80,
     "minTypeCoverage": 85,

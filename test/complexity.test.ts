@@ -73,6 +73,32 @@ function manyParams(a, b, c, d, e, f) {
 
         expect(metrics.codeSmells.excessiveParameters).toBe(1);
     });
+
+    it('should analyze nested functions and preserve class MethodDeclaration names in TypeScript', async () => {
+        const content = `
+class UserService {
+    validateUser(user: { age: number; active: boolean }) {
+        const checkAge = (age: number) => {
+            if (age >= 18) {
+                return true;
+            }
+            return false;
+        };
+        if (user.active && checkAge(user.age)) {
+            return true;
+        }
+        return false;
+    }
+}
+`;
+        await fs.writeFile(testFilePath, content);
+        const metrics = await analyzeFileComplexity(testFilePath);
+
+        expect(metrics.functionCount).toBe(2);
+        const names = metrics.functions.map(f => f.name);
+        expect(names).toContain('validateUser');
+        expect(names).toContain('checkAge');
+    });
 });
 
 describe('calculateProjectComplexity', () => {
@@ -88,9 +114,20 @@ export function helperFunc1(a: number, b: number) {
     }
     return b * 2;
 }
+
+export function veryComplexFunc(x: number, y: number, z: number) {
+    if (x > 0) {
+        if (y > 0) {
+            return z > 0 ? x + y + z : x + y;
+        } else if (y < 0) {
+            return x - y;
+        }
+    }
+    return 0;
+}
 `;
         
-        // Exact duplicate
+        // Exact duplicate of helperFunc1
         const file2Content = `
 export function redundantFunc(a: number, b: number) {
     if (a > b) {
@@ -100,19 +137,35 @@ export function redundantFunc(a: number, b: number) {
 }
 `;
 
+        const godFileLines = Array.from({ length: 505 }, (_, i) => `const line${i} = ${i};`).join('\n');
+
         await fs.writeFile(path.join(testDir, 'file1.ts'), file1Content);
         await fs.writeFile(path.join(testDir, 'file2.ts'), file2Content);
+        await fs.writeFile(path.join(testDir, 'god.ts'), godFileLines);
     });
 
     afterAll(async () => {
         await fs.rm(testDir, { recursive: true, force: true });
     });
 
-    it('should detect duplicate code across files', async () => {
-        const metrics = await calculateProjectComplexity(testDir, ['file1.ts', 'file2.ts']);
+    it('should detect duplicate code, topComplexFunctions, and godFileList across files', async () => {
+        const metrics = await calculateProjectComplexity(testDir, ['file1.ts', 'file2.ts', 'god.ts']);
         
         expect(metrics).not.toBeNull();
         expect(metrics.duplicateCode.totalClones).toBeGreaterThan(0);
         expect(metrics.duplicateCode.totalDuplicateLines).toBeGreaterThan(4);
+
+        expect(metrics.topComplexFunctions).toBeDefined();
+        expect(metrics.topComplexFunctions!.length).toBe(3);
+        expect(metrics.topComplexFunctions![0].name).toBe('veryComplexFunc');
+        expect(metrics.topComplexFunctions![0].file).toBe('file1.ts');
+        expect(metrics.topComplexFunctions![0].cyclomaticComplexity).toBeGreaterThan(
+            metrics.topComplexFunctions![1].cyclomaticComplexity
+        );
+
+        expect(metrics.godFileList).toBeDefined();
+        expect(metrics.godFileList).toHaveLength(1);
+        expect(metrics.godFileList![0].file).toBe('god.ts');
+        expect(metrics.godFileList![0].lines).toBeGreaterThan(500);
     });
 });

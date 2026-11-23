@@ -23,7 +23,7 @@ export function formatTable(data: Array<Record<string, any>>, options?: { title?
     // Function to get visible string length (excluding ANSI color codes)
     const getVisibleLength = (str: string): number => {
         // Remove ANSI color codes for width calculation
-        return str.replace(/\x1B\[\d+m/g, '').length;
+        return str.replace(/\x1B\[[0-9;]*m/g, '').length;
     };
 
     // Calculate the width of each column

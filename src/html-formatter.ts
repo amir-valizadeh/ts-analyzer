@@ -2,6 +2,15 @@ import { ProjectStats, QualityGateResult } from './index.js';
 import process from 'process';
 import path from 'path';
 
+function escapeHtml(value: unknown): string {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 export function generateHtmlReport(stats: ProjectStats): string {
     const isSafetyAvailable = !!stats.typescriptSafety;
     const isComplexityAvailable = !!stats.codeComplexity;
@@ -425,6 +434,38 @@ export function generateHtmlReport(stats: ProjectStats): string {
                             <div class="value ${stats.typescriptSafety!.totalAnyCount > 10 ? 'text-danger' : 'text-success'}">${stats.formatNumber(stats.typescriptSafety!.totalAnyCount)}</div>
                         </div>
                     </div>
+
+                    ${stats.typescriptSafety!.worstFiles && stats.typescriptSafety!.worstFiles.length > 0 ? `
+                        <div style="margin-top: 24px;">
+                            <h3 style="margin-bottom: 12px; font-size: 16px; font-weight: 600; color: var(--text-main);">🔍 Lowest Type-Safety Files (Top Hotspots)</h3>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">File</th>
+                                            <th scope="col">Safety Score</th>
+                                            <th scope="col">Coverage</th>
+                                            <th scope="col"><code>any</code></th>
+                                            <th scope="col">Assertions (<code>as</code>)</th>
+                                            <th scope="col">Non-Null (<code>!</code>)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${stats.typescriptSafety!.worstFiles.slice(0, 10).map(item => `
+                                            <tr>
+                                                <td><span class="extension-badge">${escapeHtml(item.file)}</span></td>
+                                                <td><span class="badge ${item.typeSafetyScore < 70 ? 'danger' : item.typeSafetyScore < 85 ? 'warning' : 'success'}">${item.typeSafetyScore}/100</span></td>
+                                                <td>${escapeHtml(item.typeCoverage)}%</td>
+                                                <td>${item.anyCount}</td>
+                                                <td>${item.typeAssertions}</td>
+                                                <td>${item.nonNullAssertions}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ` : ''}
                 </section>
             ` : ''}
 
@@ -446,6 +487,40 @@ export function generateHtmlReport(stats: ProjectStats): string {
                             <div class="value ${complexFilesClass === 'danger' ? 'text-danger' : 'text-success'}">${stats.formatNumber(stats.codeComplexity!.complexFiles)}</div>
                         </div>
                     </div>
+
+                    ${stats.codeComplexity!.topComplexFunctions && stats.codeComplexity!.topComplexFunctions.length > 0 ? `
+                        <div style="margin-top: 24px;">
+                            <h3 style="margin-bottom: 12px; font-size: 16px; font-weight: 600; color: var(--text-main);">🔥 Top Complex Functions</h3>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">File</th>
+                                            <th scope="col" style="width: 80px;">Line</th>
+                                            <th scope="col">Function</th>
+                                            <th scope="col">Complexity</th>
+                                            <th scope="col">Nesting</th>
+                                            <th scope="col">Params</th>
+                                            <th scope="col">Lines</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${stats.codeComplexity!.topComplexFunctions.slice(0, 10).map(fn => `
+                                            <tr>
+                                                <td><span class="extension-badge">${escapeHtml(fn.file)}</span></td>
+                                                <td>${fn.startLine}</td>
+                                                <td><code style="font-family: monospace; font-weight: 600; color: var(--primary);">${escapeHtml(fn.name)}</code></td>
+                                                <td><span class="badge ${fn.cyclomaticComplexity > 15 ? 'danger' : fn.cyclomaticComplexity > 8 ? 'warning' : 'success'}">${fn.cyclomaticComplexity}</span></td>
+                                                <td>${fn.maxNestingDepth}</td>
+                                                <td>${fn.paramCount}</td>
+                                                <td>${fn.length}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ` : ''}
                 </section>
 
                 <section aria-labelledby="smells-heading">
@@ -499,6 +574,56 @@ export function generateHtmlReport(stats: ProjectStats): string {
                         </div>
                         ` : ''}
                     </div>
+
+                    ${stats.codeComplexity!.godFileList && stats.codeComplexity!.godFileList.length > 0 ? `
+                        <div style="margin-top: 24px;">
+                            <h3 style="margin-bottom: 12px; font-size: 16px; font-weight: 600; color: var(--danger-text);">⚠️ God Files (> 500 Lines)</h3>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">File</th>
+                                            <th scope="col" style="width: 150px;">Lines</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${stats.codeComplexity!.godFileList.slice(0, 10).map(gf => `
+                                            <tr>
+                                                <td><span class="extension-badge">${escapeHtml(gf.file)}</span></td>
+                                                <td><span class="badge danger">${gf.lines} lines</span></td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${stats.codeComplexity!.duplicateCode?.clones && stats.codeComplexity!.duplicateCode.clones.length > 0 ? `
+                        <div style="margin-top: 24px;">
+                            <h3 style="margin-bottom: 12px; font-size: 16px; font-weight: 600; color: var(--danger-text);">👯 Duplicate Code Clones</h3>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th scope="col" style="width: 50px;">#</th>
+                                            <th scope="col">Duplicate Locations</th>
+                                            <th scope="col" style="width: 120px;">Lines</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${stats.codeComplexity!.duplicateCode.clones.slice(0, 10).map((clone, idx) => `
+                                            <tr>
+                                                <td>${idx + 1}</td>
+                                                <td>${clone.instances.map(inst => `<code style="font-family: monospace; font-size: 13px;">${escapeHtml(inst.filePath)}:${inst.startLine}-${inst.endLine} (${escapeHtml(inst.functionName)})</code>`).join(' &harr; ')}</td>
+                                                <td><span class="badge danger">${clone.lines} lines</span></td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ` : ''}
                 </section>
             ` : ''}
 
@@ -553,7 +678,10 @@ export function generateHtmlReport(stats: ProjectStats): string {
                                         ${stats.dependencies!.circularDependencies.map((cycle, idx) => `
                                             <tr>
                                                 <td>${idx + 1}</td>
-                                                <td><code style="font-family: monospace; color: var(--danger); font-size: 13px;">${cycle.formattedCycle || cycle.cycle.join(' &rarr; ')}</code></td>
+                                                <td>
+                                                    <code style="font-family: monospace; color: var(--danger); font-size: 13px;">${cycle.formattedCycle ? cycle.formattedCycle.replace(/</g, '&lt;') : cycle.cycle.map(escapeHtml).join(' &rarr; ')}</code>
+                                                    ${cycle.isTypeOnly ? `<span class="badge warning" style="margin-left: 8px; font-size: 11px;">type-only</span>` : ''}
+                                                </td>
                                                 <td><span class="badge danger">${cycle.length || cycle.cycle.length - 1} hops</span></td>
                                             </tr>
                                         `).join('')}
@@ -581,9 +709,9 @@ export function generateHtmlReport(stats: ProjectStats): string {
                                     <tbody>
                                         ${stats.dependencies!.unusedExports.slice(0, 50).map(item => `
                                             <tr>
-                                                <td><span class="extension-badge">${item.file}</span></td>
+                                                <td><span class="extension-badge">${escapeHtml(item.file)}</span></td>
                                                 <td>${item.line}</td>
-                                                <td><code style="font-family: monospace; font-weight: 600; color: var(--primary);">${item.exportName}</code></td>
+                                                <td><code style="font-family: monospace; font-weight: 600; color: var(--primary);">${escapeHtml(item.exportName)}</code></td>
                                             </tr>
                                         `).join('')}
                                     </tbody>

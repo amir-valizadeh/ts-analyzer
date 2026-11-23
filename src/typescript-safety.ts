@@ -2,7 +2,6 @@
 import * as ts from 'typescript';
 import fs from 'fs/promises';
 import path from 'path';
-import { constrainedMemory } from 'process';
 
 export interface TypeScriptMetrics {
     totalTypeableNodes: number;
@@ -15,7 +14,15 @@ export interface TypeScriptMetrics {
     genericsCount: number;
     typeSafetyScore: number;
     typeComplexity: string;
-    
+}
+
+export interface FileSafetyHotspot {
+    file: string;
+    typeSafetyScore: number;
+    typeCoverage: string;
+    anyCount: number;
+    typeAssertions: number;
+    nonNullAssertions: number;
 }
 
 export interface TypeScriptSafetyMetrics {
@@ -27,12 +34,42 @@ export interface TypeScriptSafetyMetrics {
     totalNonNullAssertions: number;
     avgTypeSafetyScore: number;
     overallComplexity: string;
+    worstFiles?: FileSafetyHotspot[];
+}
+
+/**
+ * Reads tsconfig.json once for a directory using TypeScript's config reader (supports comments and trailing commas).
+ */
+export function getTsconfigScore(searchDir: string): number {
+    const candidates = [
+        path.resolve(searchDir, 'tsconfig.json'),
+        path.resolve(searchDir, '..', 'tsconfig.json')
+    ];
+
+    for (const configPath of candidates) {
+        if (ts.sys.fileExists(configPath)) {
+            const { config, error } = ts.readConfigFile(configPath, ts.sys.readFile);
+            if (!error && config && typeof config === 'object') {
+                let score = 0;
+                const opts = config.compilerOptions;
+                if (opts && typeof opts === 'object') {
+                    if (opts.strict === true) score += 5;
+                    if (opts.noImplicitAny === true) score += 3;
+                    if (opts.strictNullChecks === true) score += 3;
+                    if (opts.noImplicitReturns === true) score += 2;
+                }
+                return score;
+            }
+        }
+    }
+
+    return 5; // Default TypeScript compiler baseline when tsconfig.json is not found
 }
 
 /**
  * Realistic TypeScript safety analyzer that provides results comparable to real-world analysis tools
  */
-export async function analyzeTypeScriptSafety(filePath: string): Promise<TypeScriptMetrics> {
+export async function analyzeTypeScriptSafety(filePath: string, precomputedTsconfigScore?: number): Promise<TypeScriptMetrics> {
     try {
         const content = await fs.readFile(filePath, 'utf8');
         
@@ -169,66 +206,8 @@ export async function analyzeTypeScriptSafety(filePath: string): Promise<TypeScr
 
         visit(sourceFile);
 
-        // Calculate type coverage percentage
-        // Look for tsconfig
-        let tsconfigPath = path.join(path.dirname(filePath), '..', 'tsconfig.json');
-        let tsconfigScore = 0;
-        let tsconfigFeatures = [];
-
-        try {
-            const tsconfigContent = await fs.readFile(tsconfigPath, 'utf8');
-            const tsconfig = JSON.parse(tsconfigContent);
-
-            // Check for strict mode and other type safety features
-            if (tsconfig.compilerOptions) {
-                if (tsconfig.compilerOptions.strict === true) {
-                    tsconfigScore += 5;
-                    tsconfigFeatures.push('strict');
-                }
-                if (tsconfig.compilerOptions.noImplicitAny === true) {
-                    tsconfigScore += 3;
-                    tsconfigFeatures.push('noImplicitAny');
-                }
-                if (tsconfig.compilerOptions.strictNullChecks === true) {
-                    tsconfigScore += 3;
-                    tsconfigFeatures.push('strictNullChecks');
-                }
-                if (tsconfig.compilerOptions.noImplicitReturns === true) {
-                    tsconfigScore += 2;
-                    tsconfigFeatures.push('noImplicitReturns');
-                }
-            }
-        } catch (e) {
-            // Try the current directory
-            tsconfigPath = path.join(path.dirname(filePath), 'tsconfig.json');
-            try {
-                const tsconfigContent = await fs.readFile(tsconfigPath, 'utf8');
-                const tsconfig = JSON.parse(tsconfigContent);
-
-                // Check for strict mode and other type safety features
-                if (tsconfig.compilerOptions) {
-                    if (tsconfig.compilerOptions.strict === true) {
-                        tsconfigScore += 5;
-                        tsconfigFeatures.push('strict');
-                    }
-                    if (tsconfig.compilerOptions.noImplicitAny === true) {
-                        tsconfigScore += 3;
-                        tsconfigFeatures.push('noImplicitAny');
-                    }
-                    if (tsconfig.compilerOptions.strictNullChecks === true) {
-                        tsconfigScore += 3;
-                        tsconfigFeatures.push('strictNullChecks');
-                    }
-                    if (tsconfig.compilerOptions.noImplicitReturns === true) {
-                        tsconfigScore += 2;
-                        tsconfigFeatures.push('noImplicitReturns');
-                    }
-                }
-            } catch (e) {
-                // tsconfig.json not found or invalid, assume default typings
-                tsconfigScore += 5; // Default TypeScript is still quite safe
-            }
-        }
+        // Calculate type coverage percentage using tsconfig score
+        const tsconfigScore = precomputedTsconfigScore ?? getTsconfigScore(path.dirname(filePath));
 
         // If no typeable nodes found, ensure we have at least one to avoid division by zero
         if (metrics.totalTypeableNodes === 0) {
@@ -245,17 +224,20 @@ export async function analyzeTypeScriptSafety(filePath: string): Promise<TypeScr
         // Realistically, type-coverage will often show ~95% coverage for well-typed code
         // But we want to give a slightly lower score to encourage explicit type annotations
         // This provides a more realistic metric based on real-world TypeScript projects
-        let adjustedTypeCoverage = rawTypeCoverage * (0.75 + (explicitRatio * 0.25));
+        const adjustedTypeCoverage = rawTypeCoverage * (0.75 + (explicitRatio * 0.25));
 
         // Add tsconfig bonus, but cap it
         const typeCoverage = Math.min(adjustedTypeCoverage + tsconfigScore, 98); // Cap at 98% to be realistic
 
         // Calculate type safety score (higher is better, scale 0-100)
-        const coverageScore = Math.min(typeCoverage, 100) * 0.6; // 60% weight
-        const anyPenalty = Math.min((metrics.anyTypeCount / Math.max(metrics.totalTypeableNodes, 1)) * 100, 30) * 0.2; // 20% weight
-        const assertionPenalty = Math.min((metrics.typeAssertions / Math.max(metrics.totalTypeableNodes, 1)) * 100, 20) * 0.2; // 20% weight
+        // Base score scales to 90-100 for a 100%-typed file depending on tsconfig strictness
+        const nodeCount = Math.max(metrics.totalTypeableNodes, 1);
+        const baseScore = Math.min(adjustedTypeCoverage * 0.9 + tsconfigScore, 100);
+        const anyPenalty = Math.min((metrics.anyTypeCount / nodeCount) * 60 + metrics.anyTypeCount * 2, 40);
+        const assertionPenalty = Math.min((metrics.typeAssertions / nodeCount) * 30 + metrics.typeAssertions * 1.5, 25);
+        const nonNullPenalty = Math.min((metrics.nonNullAssertions / nodeCount) * 20 + metrics.nonNullAssertions * 1, 20);
 
-        const typeSafetyScore = Math.max(0, Math.min(coverageScore - anyPenalty - assertionPenalty, 100));
+        const typeSafetyScore = Math.max(0, Math.min(baseScore - anyPenalty - assertionPenalty - nonNullPenalty, 100));
 
         // Determine complexity level based on score
         let complexityLevel: string;
@@ -305,26 +287,55 @@ export async function calculateProjectTypeSafety(projectPath: string, fileList: 
             totalAssertions: 0,
             totalNonNullAssertions: 0,
             avgTypeSafetyScore: 0,
-            overallComplexity: 'N/A'
+            overallComplexity: 'N/A',
+            worstFiles: []
         };
     }
+
+    const tsconfigScore = getTsconfigScore(projectPath);
 
     let totalTypeCoverage = 0;
     let totalTypeSafetyScore = 0;
     let totalAnyCount = 0;
     let totalAssertions = 0;
     let totalNonNullAssertions = 0;
+    const worstFiles: FileSafetyHotspot[] = [];
 
     for (const file of typescriptFiles) {
         const filePath = path.join(projectPath, file);
-        const metrics = await analyzeTypeScriptSafety(filePath);
+        const metrics = await analyzeTypeScriptSafety(filePath, tsconfigScore);
 
         totalTypeCoverage += parseFloat(metrics.typeCoverage);
         totalTypeSafetyScore += metrics.typeSafetyScore;
         totalAnyCount += metrics.anyTypeCount;
         totalAssertions += metrics.typeAssertions;
         totalNonNullAssertions += metrics.nonNullAssertions;
+
+        worstFiles.push({
+            file,
+            typeSafetyScore: metrics.typeSafetyScore,
+            typeCoverage: metrics.typeCoverage,
+            anyCount: metrics.anyTypeCount,
+            typeAssertions: metrics.typeAssertions,
+            nonNullAssertions: metrics.nonNullAssertions
+        });
     }
+
+    worstFiles.sort((a, b) => {
+        if (a.typeSafetyScore !== b.typeSafetyScore) {
+            return a.typeSafetyScore - b.typeSafetyScore;
+        }
+        const aIssues = a.anyCount + a.typeAssertions + a.nonNullAssertions;
+        const bIssues = b.anyCount + b.typeAssertions + b.nonNullAssertions;
+        if (aIssues !== bIssues) {
+            return bIssues - aIssues;
+        }
+        const covDiff = parseFloat(a.typeCoverage) - parseFloat(b.typeCoverage);
+        if (covDiff !== 0) {
+            return covDiff;
+        }
+        return a.file.localeCompare(b.file);
+    });
 
     const avgTypeCoverage = (totalTypeCoverage / typescriptFiles.length).toFixed(1);
     const avgTypeSafetyScore = Math.round(totalTypeSafetyScore / typescriptFiles.length);
@@ -343,6 +354,7 @@ export async function calculateProjectTypeSafety(projectPath: string, fileList: 
         totalAssertions,
         totalNonNullAssertions,
         avgTypeSafetyScore,
-        overallComplexity
+        overallComplexity,
+        worstFiles
     };
 }

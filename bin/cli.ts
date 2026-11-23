@@ -37,12 +37,16 @@ interface ProgramOptions {
     maxClones?: string;
     compare?: string;
     githubSummary?: boolean;
+    hotspots?: boolean;
+    top?: string;
+    entry?: string;
+    ignoreTypeCycles?: boolean;
 }
 
 program
     .name('ts-analyzer')
     .description('Comprehensive TypeScript code analyzer with CI/CD Quality Gate & Regression Tracking')
-    .version('2.0.0')
+    .version('2.1.0')
     .argument('[dir]', 'project directory to analyze', '.')
     .option('-e, --exclude <patterns>', 'additional patterns to exclude (comma-separated)')
     .option('-i, --include <extensions>', 'additional file extensions to include (comma-separated)')
@@ -61,6 +65,10 @@ program
     .option('--max-clones <number>', 'maximum duplicate code clones allowed')
     .option('--compare <path>', 'path to a baseline JSON file to compare against and display diffs')
     .option('--github-summary', 'write GitHub Actions $GITHUB_STEP_SUMMARY markdown file or output annotations')
+    .option('--hotspots', 'display detailed file/function hotspot drilldown tables')
+    .option('--top <number>', 'max number of items to show per hotspot section (default: 10; implies --hotspots)')
+    .option('--entry <patterns>', 'comma-separated entry point paths/globs to exclude from unused export checks')
+    .option('--ignore-type-cycles', 'ignore type-only (import type / export type) circular dependencies')
     .action(async (dir: string, options: ProgramOptions) => {
         let configOptions: any = {};
         try {
@@ -97,6 +105,26 @@ program
             const analyzeSafety = options.safety !== false && configOptions.safety !== false;
             const analyzeComplexity = options.complexity !== false && configOptions.complexity !== false;
             const analyzeDependencies = options.dependencies !== false && configOptions.dependencies !== false;
+
+            const entryPoints: string[] = [];
+            if (Array.isArray(configOptions.entryPoints)) {
+                entryPoints.push(
+                    ...configOptions.entryPoints
+                        .filter((p: unknown): p is string => typeof p === 'string')
+                        .map((p: string) => p.trim())
+                        .filter(Boolean)
+                );
+            }
+            if (options.entry) {
+                entryPoints.push(
+                    ...options.entry.split(',').map((p: string) => p.trim()).filter(Boolean)
+                );
+            }
+            const ignoreTypeCycles = Boolean(options.ignoreTypeCycles || configOptions.ignoreTypeCycles);
+
+            const parsedTop = options.top !== undefined ? parseInt(options.top, 10) : 10;
+            const topLimit = Number.isFinite(parsedTop) && parsedTop > 0 ? parsedTop : 10;
+            const showHotspots = Boolean(options.hotspots || options.top !== undefined);
 
             const isQualityGateRequested = !!(
                 options.check ||
@@ -154,6 +182,8 @@ program
                 analyzeSafety,
                 analyzeComplexity,
                 analyzeDependencies,
+                entryPoints: entryPoints.length > 0 ? entryPoints : undefined,
+                ignoreTypeCycles,
                 qualityGate: qualityGateThresholds
             });
 
@@ -402,11 +432,17 @@ program
 
                 if (stats.dependencies.circularDependencies.length > 0) {
                     console.log('\n' + (useColors ? chalk.bold.red('⚠️  Circular Dependency Cycles:') : '⚠️  Circular Dependency Cycles:'));
-                    const cycleRows = stats.dependencies.circularDependencies.map((c, i) => ({
-                        '#': String(i + 1),
-                        'Cycle Chain': c.formattedCycle || c.cycle.join(' -> '),
-                        'Hops': String(c.length || c.cycle.length - 1)
-                    }));
+                    const cycleRows = stats.dependencies.circularDependencies.map((c, i) => {
+                        const baseChain = c.formattedCycle || c.cycle.join(' -> ');
+                        const typeBadge = c.isTypeOnly
+                            ? (useColors ? chalk.dim(' (type-only)') : ' (type-only)')
+                            : '';
+                        return {
+                            '#': String(i + 1),
+                            'Cycle Chain': `${baseChain}${typeBadge}`,
+                            'Hops': String(c.length || c.cycle.length - 1)
+                        };
+                    });
                     formatTable(cycleRows);
                 }
 
@@ -426,6 +462,59 @@ program
                             ? chalk.dim(`... and ${remaining} more unused export(s)`)
                             : `... and ${remaining} more unused export(s)`);
                     }
+                }
+            }
+
+            // Print actionable hotspot drilldown tables when --hotspots or --top is requested
+            if (showHotspots) {
+                const topFunctions = stats.codeComplexity?.topComplexFunctions?.slice(0, topLimit) || [];
+                if (topFunctions.length > 0) {
+                    console.log('\n' + (useColors ? chalk.bold.cyan(`🔥 Top Complex Functions (top ${topFunctions.length}):`) : `🔥 Top Complex Functions (top ${topFunctions.length}):`));
+                    formatTable(topFunctions.map(fn => ({
+                        'File:Line': `${fn.file}:${fn.startLine}`,
+                        'Function': fn.name,
+                        'Complexity': String(fn.cyclomaticComplexity),
+                        'Nesting': String(fn.maxNestingDepth),
+                        'Params': String(fn.paramCount),
+                        'Lines': String(fn.length)
+                    })));
+                }
+
+                const worstFiles = stats.typescriptSafety?.worstFiles?.slice(0, topLimit) || [];
+                if (worstFiles.length > 0) {
+                    console.log('\n' + (useColors ? chalk.bold.cyan(`🛡️  Lowest Type-Safety Files (top ${worstFiles.length}):`) : `🛡️  Lowest Type-Safety Files (top ${worstFiles.length}):`));
+                    formatTable(worstFiles.map(f => ({
+                        'File': f.file,
+                        'Score': `${f.typeSafetyScore}/100`,
+                        'Coverage': `${f.typeCoverage}%`,
+                        'any': String(f.anyCount),
+                        'as': String(f.typeAssertions),
+                        '!': String(f.nonNullAssertions)
+                    })));
+                }
+
+                const godFiles = stats.codeComplexity?.godFileList?.slice(0, topLimit) || [];
+                if (godFiles.length > 0) {
+                    console.log('\n' + (useColors ? chalk.bold.magenta(`🏗️  God Files (top ${godFiles.length}):`) : `🏗️  God Files (top ${godFiles.length}):`));
+                    formatTable(godFiles.map(g => ({
+                        'File': g.file,
+                        'Lines': stats.formatNumber(g.lines)
+                    })));
+                }
+
+                const clones = stats.codeComplexity?.duplicateCode?.clones?.slice(0, topLimit) || [];
+                if (clones.length > 0) {
+                    console.log('\n' + (useColors ? chalk.bold.magenta(`👯 Duplicate Code Clones (top ${clones.length}):`) : `👯 Duplicate Code Clones (top ${clones.length}):`));
+                    const formatCloneInstance = (inst?: { filePath: string; startLine: number; endLine: number; functionName: string }) =>
+                        inst ? `${inst.filePath}:${inst.startLine}-${inst.endLine} (${inst.functionName})` : '-';
+                    formatTable(clones.map(clone => {
+                        const extra = clone.instances.length > 2 ? ` (+${clone.instances.length - 2} more)` : '';
+                        return {
+                            'Clone A': formatCloneInstance(clone.instances[0]),
+                            'Clone B': `${formatCloneInstance(clone.instances[1])}${extra}`,
+                            'Lines': String(clone.lines)
+                        };
+                    }));
                 }
             }
 

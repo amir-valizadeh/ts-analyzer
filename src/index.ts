@@ -1,12 +1,13 @@
 import fs from 'fs/promises';
 import path from 'path';
 
-import { calculateProjectTypeSafety, TypeScriptSafetyMetrics } from './typescript-safety.js';
-import { calculateProjectComplexity, CodeComplexityMetrics } from './code-complexity.js';
+import { calculateProjectTypeSafety, TypeScriptSafetyMetrics, FileSafetyHotspot } from './typescript-safety.js';
+import { calculateProjectComplexity, CodeComplexityMetrics, FunctionComplexityHotspot, GodFileHotspot } from './code-complexity.js';
 import { generateContextOutline } from './context-mapper.js';
 import { generateRules, RulesGeneratorOptions } from './rules-generator.js';
 import {
     analyzeDependencies,
+    DependencyAnalysisOptions,
     DependencyAnalysisResult,
     CircularDependencyCycle,
     UnusedExport
@@ -27,9 +28,13 @@ export {
     generateRules,
     RulesGeneratorOptions,
     analyzeDependencies,
+    DependencyAnalysisOptions,
     DependencyAnalysisResult,
     CircularDependencyCycle,
     UnusedExport,
+    FileSafetyHotspot,
+    FunctionComplexityHotspot,
+    GodFileHotspot,
     QualityGateThresholds,
     QualityGateViolation,
     QualityGateResult,
@@ -86,6 +91,8 @@ export interface ProjectOptions {
     analyzeSafety?: boolean;
     analyzeComplexity?: boolean;
     analyzeDependencies?: boolean;
+    entryPoints?: string[];
+    ignoreTypeCycles?: boolean;
     qualityGate?: QualityGateThresholds;
 }
 
@@ -220,7 +227,10 @@ export async function analyzeProject(projectPath = '.', options: ProjectOptions 
     }
 
     if (options.analyzeDependencies !== false) {
-        stats.dependencies = await analyzeDependencies(projectPath, allFilePaths);
+        stats.dependencies = await analyzeDependencies(projectPath, allFilePaths, {
+            entryPoints: options.entryPoints,
+            ignoreTypeCycles: options.ignoreTypeCycles
+        });
     }
 
     if (options.qualityGate) {

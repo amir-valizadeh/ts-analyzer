@@ -38,6 +38,22 @@ export interface DuplicateClone {
   instances: Array<{ filePath: string; startLine: number; endLine: number; functionName: string }>;
 }
 
+export interface FunctionComplexityHotspot {
+  file: string;
+  name: string;
+  startLine: number;
+  endLine: number;
+  cyclomaticComplexity: number;
+  maxNestingDepth: number;
+  paramCount: number;
+  length: number;
+}
+
+export interface GodFileHotspot {
+  file: string;
+  lines: number;
+}
+
 export interface FileComplexityMetrics {
   avgComplexity: string;
   maxComplexity: number;
@@ -49,6 +65,7 @@ export interface FileComplexityMetrics {
   complexityScore: number;
   complexityRating: string;
   functions: FunctionData[];
+  lineCount?: number;
   codeSmells: {
     magicNumbers: number;
     callbackHell: number;
@@ -78,6 +95,8 @@ export interface CodeComplexityMetrics {
     totalDuplicateLines: number;
     clones: DuplicateClone[];
   };
+  topComplexFunctions?: FunctionComplexityHotspot[];
+  godFileList?: GodFileHotspot[];
 }
 
 // Calculate cyclomatic complexity
@@ -289,10 +308,19 @@ function parseTypeScriptFile(content: string): SimplifiedProgram {
           checkNode(node.body);
         }
 
+        let fnName: string | undefined;
+        if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isFunctionExpression(node)) && node.name) {
+          fnName = ts.isIdentifier(node.name) ? node.name.text : node.name.getText(sourceFile);
+        } else if (node.parent && ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+          fnName = node.parent.name.text;
+        } else if (node.parent && (ts.isPropertyDeclaration(node.parent) || ts.isPropertyAssignment(node.parent)) && node.parent.name) {
+          fnName = ts.isIdentifier(node.parent.name) ? node.parent.name.text : node.parent.name.getText(sourceFile);
+        }
+
         const functionNode: any = {
           type: ts.isFunctionDeclaration(node) ? 'FunctionDeclaration' :
             ts.isArrowFunction(node) ? 'ArrowFunctionExpression' : 'FunctionExpression',
-          id: ts.isFunctionDeclaration(node) && node.name ? { name: node.name.text } : undefined,
+          id: fnName ? { name: fnName } : undefined,
           params: node.parameters ? node.parameters.map(() => ({})) : [],
           body: { type: 'BlockStatement', body: [] as any[] },
           loc: {
@@ -304,7 +332,6 @@ function parseTypeScriptFile(content: string): SimplifiedProgram {
         };
 
         simplifiedAst.body.push(functionNode);
-        return; // Don't recurse into function body for the main visit (already handled by checkNode)
       }
 
       ts.forEachChild(node, visit);
@@ -355,6 +382,7 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
           complexityScore: 0,
           complexityRating: 'N/A',
           functions: [],
+          lineCount: 0,
           codeSmells: { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 }
         };
       }
@@ -391,7 +419,7 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
     });
 
     // Check for god file (> 500 lines)
-    const lineCount = content.split('\n').length;
+    const lineCount = contentLines.length;
     const godFiles = lineCount > 500 ? 1 : 0;
 
     let callbackHell = 0;
@@ -413,6 +441,7 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
         complexityScore: 0,
         complexityRating: 'N/A',
         functions: [],
+        lineCount,
         codeSmells: { magicNumbers, callbackHell, godFiles, excessiveParameters }
       };
     }
@@ -466,6 +495,7 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
       complexityScore: Math.round(totalScore),
       complexityRating,
       functions,
+      lineCount,
       codeSmells: { magicNumbers, callbackHell, godFiles, excessiveParameters }
     };
   } catch (error) {
@@ -481,6 +511,7 @@ export async function analyzeFileComplexity(filePath: string): Promise<FileCompl
       complexityScore: 0,
       complexityRating: 'N/A',
       functions: [],
+      lineCount: 0,
       codeSmells: { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 }
     };
   }
@@ -502,7 +533,9 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
       complexFiles: 0,
       overallComplexity: 'N/A',
       codeSmells: { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 },
-      duplicateCode: { totalClones: 0, totalDuplicateLines: 0, clones: [] }
+      duplicateCode: { totalClones: 0, totalDuplicateLines: 0, clones: [] },
+      topComplexFunctions: [],
+      godFileList: []
     };
   }
 
@@ -516,13 +549,33 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
 
   let totalSmells = { magicNumbers: 0, callbackHell: 0, godFiles: 0, excessiveParameters: 0 };
   const globalFunctionHashes = new Map<string, Array<{ filePath: string; startLine: number; endLine: number; functionName: string }>>();
+  const topComplexFunctions: FunctionComplexityHotspot[] = [];
+  const godFileList: GodFileHotspot[] = [];
 
   for (const file of jsFiles) {
     const filePath = path.join(projectPath, file);
     const metrics = await analyzeFileComplexity(filePath);
 
-    // Track for clones
+    if (metrics.codeSmells.godFiles > 0) {
+      godFileList.push({
+        file,
+        lines: metrics.lineCount ?? 0
+      });
+    }
+
+    // Track for clones and function-level hotspots
     metrics.functions.forEach(fn => {
+      topComplexFunctions.push({
+        file,
+        name: fn.name,
+        startLine: fn.startLine,
+        endLine: fn.endLine,
+        cyclomaticComplexity: fn.complexity,
+        maxNestingDepth: fn.nestingDepth,
+        paramCount: fn.paramCount,
+        length: fn.lineCount
+      });
+
       if (fn.hash) {
         if (!globalFunctionHashes.has(fn.hash)) {
           globalFunctionHashes.set(fn.hash, []);
@@ -552,6 +605,29 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
       complexFiles++;
     }
   }
+
+  topComplexFunctions.sort((a, b) => {
+    if (b.cyclomaticComplexity !== a.cyclomaticComplexity) {
+      return b.cyclomaticComplexity - a.cyclomaticComplexity;
+    }
+    if (b.maxNestingDepth !== a.maxNestingDepth) {
+      return b.maxNestingDepth - a.maxNestingDepth;
+    }
+    if (b.length !== a.length) {
+      return b.length - a.length;
+    }
+    if (a.file !== b.file) {
+      return a.file.localeCompare(b.file);
+    }
+    return a.startLine - b.startLine;
+  });
+
+  godFileList.sort((a, b) => {
+    if (b.lines !== a.lines) {
+      return b.lines - a.lines;
+    }
+    return a.file.localeCompare(b.file);
+  });
 
   // Calculate project averages
   const avgComplexity = totalFunctions > 0 ? (totalComplexity / totalFunctions).toFixed(1) : '0.0';
@@ -596,6 +672,8 @@ export async function calculateProjectComplexity(projectPath: string, fileList: 
       totalClones: clones.length,
       totalDuplicateLines,
       clones
-    }
+    },
+    topComplexFunctions,
+    godFileList
   };
 }
