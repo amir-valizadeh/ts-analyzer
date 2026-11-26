@@ -488,88 +488,147 @@ function extractBindingNames(nameNode: ts.BindingName): Array<{ name: string; no
     return results;
 }
 
+const MAX_CYCLES = 500;
+const MAX_CYCLE_LENGTH = 50;
+
 /**
- * Detects all simple cycles in a directed graph using DFS and deduplicates symmetric cycles.
+ * Detects all elementary (simple) cycles in a directed graph with Johnson's algorithm
+ * (D. B. Johnson, "Finding all the elementary circuits of a directed graph", 1975), which runs in
+ * O((V + E)(C + 1)) for C cycles. A plain DFS from every node is exponential in the number of
+ * paths, which on real import graphs with few cycles but many paths can take tens of minutes.
+ *
+ * Each cycle is reported once, rotated to start at its smallest vertex and closed (the first
+ * vertex repeated). At most MAX_CYCLES cycles of at most MAX_CYCLE_LENGTH vertices are returned,
+ * sorted by first vertex, then length, then formatted text.
  */
-function detectCycles(
+export function detectCycles(
     graph: Record<string, string[]>,
     runtimeEdges: Set<string>
 ): CircularDependencyCycle[] {
-    const cycles: CircularDependencyCycle[] = [];
-    const seenKeys = new Set<string>();
     const nodes = Object.keys(graph).sort();
+    const index = new Map(nodes.map((name, i) => [name, i]));
+    // Adjacency by vertex index, de-duplicated, ignoring edges to files outside the graph.
+    const adjacency: number[][] = nodes.map(name => {
+        const targets = new Set<number>();
+        for (const neighbor of graph[name] || []) {
+            const target = index.get(neighbor);
+            if (target !== undefined) targets.add(target);
+        }
+        return [...targets];
+    });
 
-    const currentPath: string[] = [];
-    const visitedInPath = new Set<string>();
+    const found: number[][] = [];
 
-    function dfs(node: string, depth: number): void {
-        if (depth > 50 || cycles.length >= 500) return;
-
-        const neighbors = graph[node] || [];
-        for (const neighbor of neighbors) {
-            if (visitedInPath.has(neighbor)) {
-                // Cycle detected
-                const cycleStartIndex = currentPath.indexOf(neighbor);
-                if (cycleStartIndex !== -1) {
-                    const rawCycle = [...currentPath.slice(cycleStartIndex), neighbor];
-                    const uniqueVertices = rawCycle.slice(0, -1);
-                    if (uniqueVertices.length > 0) {
-                        // Find minimum vertex to normalize rotation
-                        let minIdx = 0;
-                        for (let i = 1; i < uniqueVertices.length; i++) {
-                            if (uniqueVertices[i] < uniqueVertices[minIdx]) {
-                                minIdx = i;
-                            }
-                        }
-                        const rotated = [
-                            ...uniqueVertices.slice(minIdx),
-                            ...uniqueVertices.slice(0, minIdx)
-                        ];
-                        const normalizedCycle = [...rotated, rotated[0]];
-                        const key = normalizedCycle.join(' -> ');
-                        if (!seenKeys.has(key)) {
-                            seenKeys.add(key);
-                            let isTypeOnly = false;
-                            for (let i = 0; i < normalizedCycle.length - 1; i++) {
-                                const edgeKey = `${normalizedCycle[i]}\0${normalizedCycle[i + 1]}`;
-                                if (!runtimeEdges.has(edgeKey)) {
-                                    isTypeOnly = true;
-                                    break;
-                                }
-                            }
-                            cycles.push({
-                                cycle: normalizedCycle,
-                                formattedCycle: key,
-                                length: normalizedCycle.length - 1,
-                                isTypeOnly
-                            });
-                        }
-                    }
+    // Tarjan: the strongly connected component containing `start` within the subgraph induced
+    // by vertices >= start, or undefined if `start` is in no cycle there.
+    function componentOf(start: number): Set<number> | undefined {
+        let counter = 0;
+        const order: number[] = new Array(nodes.length).fill(-1);
+        const low: number[] = new Array(nodes.length).fill(-1);
+        const onStack = new Set<number>();
+        const stack: number[] = [];
+        let result: Set<number> | undefined;
+        function strongConnect(v: number): void {
+            order[v] = counter;
+            low[v] = counter;
+            counter++;
+            stack.push(v);
+            onStack.add(v);
+            for (const w of adjacency[v]) {
+                if (w < start) continue;
+                if (order[w] === -1) {
+                    strongConnect(w);
+                    low[v] = Math.min(low[v], low[w]);
+                } else if (onStack.has(w)) {
+                    low[v] = Math.min(low[v], order[w]);
                 }
-            } else {
-                visitedInPath.add(neighbor);
-                currentPath.push(neighbor);
-                dfs(neighbor, depth + 1);
-                currentPath.pop();
-                visitedInPath.delete(neighbor);
+            }
+            if (low[v] === order[v]) {
+                const component = new Set<number>();
+                for (let w = stack.pop(); w !== undefined; w = stack.pop()) {
+                    onStack.delete(w);
+                    component.add(w);
+                    if (w === v) break;
+                }
+                if (component.has(start)) result = component;
             }
         }
+        strongConnect(start);
+        return result;
     }
 
-    for (const startNode of nodes) {
-        visitedInPath.add(startNode);
-        currentPath.push(startNode);
-        dfs(startNode, 1);
-        currentPath.pop();
-        visitedInPath.delete(startNode);
+    for (let start = 0; start < nodes.length && found.length < MAX_CYCLES; start++) {
+        const component = componentOf(start);
+        if (!component) continue;
+        if (component.size === 1 && !adjacency[start].includes(start)) continue;
+
+        const blocked = new Set<number>();
+        const blockedBy = new Map<number, Set<number>>();
+        const path: number[] = [];
+
+        const unblock = (u: number): void => {
+            blocked.delete(u);
+            const waiting = blockedBy.get(u);
+            if (!waiting) return;
+            blockedBy.delete(u);
+            for (const w of waiting) if (blocked.has(w)) unblock(w);
+        };
+
+        const circuit = (v: number): boolean => {
+            let closed = false;
+            path.push(v);
+            blocked.add(v);
+            for (const w of adjacency[v]) {
+                if (found.length >= MAX_CYCLES) break;
+                if (!component.has(w)) continue;
+                if (w === start) {
+                    if (path.length <= MAX_CYCLE_LENGTH) found.push([...path]);
+                    closed = true;
+                } else if (!blocked.has(w) && path.length < MAX_CYCLE_LENGTH) {
+                    if (circuit(w)) closed = true;
+                }
+            }
+            if (closed) {
+                unblock(v);
+            } else {
+                for (const w of adjacency[v]) {
+                    if (!component.has(w)) continue;
+                    let waiting = blockedBy.get(w);
+                    if (!waiting) blockedBy.set(w, (waiting = new Set()));
+                    waiting.add(v);
+                }
+            }
+            path.pop();
+            return closed;
+        };
+
+        circuit(start);
     }
 
-    // Sort cycles deterministically
+    // Johnson's algorithm starts each cycle at its smallest vertex (vertices are visited in
+    // sorted order), so no rotation is needed.
+    const cycles: CircularDependencyCycle[] = found.map(vertices => {
+        const cycle = [...vertices.map(i => nodes[i]), nodes[vertices[0]]];
+        let isTypeOnly = false;
+        for (let i = 0; i < cycle.length - 1; i++) {
+            if (!runtimeEdges.has(`${cycle[i]}\0${cycle[i + 1]}`)) {
+                isTypeOnly = true;
+                break;
+            }
+        }
+        return {
+            cycle,
+            formattedCycle: cycle.join(' -> '),
+            length: vertices.length,
+            isTypeOnly
+        };
+    });
+
     cycles.sort((a, b) => {
         if (a.cycle[0] !== b.cycle[0]) {
             return a.cycle[0].localeCompare(b.cycle[0]);
         }
-        return (a.length || a.cycle.length) - (b.length || b.cycle.length);
+        return a.cycle.length - b.cycle.length || a.cycle.join(' -> ').localeCompare(b.cycle.join(' -> '));
     });
 
     return cycles;
